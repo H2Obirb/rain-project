@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>M2 物種雛形 - 精神概念生物 3D 模擬系統</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Three.js & OrbitControls & Tween.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+</head>
+<body>
+  <!-- 3D 渲染畫布容器 -->
+  <div id="canvas-container"></div>
+
+  <!-- 浮動控制介面 HUD -->
+  <div id="ui-overlay">
+    <header class="hud-header" id="hud-header">
+      <div class="header-top">
+        <div class="badge" id="category-badge">正・正向情緒陣營</div>
+        <div class="species-selector">
+          <button id="tab-love" class="tab-btn active">愛 (Love)</button>
+          <button id="tab-shame" class="tab-btn">羞恥 (Shame)</button>
+          <button id="tab-void" class="tab-btn">虛無 (Void)</button>
+          <button id="tab-sins" class="tab-btn">七大罪 (Seven Sins)</button>
+        </div>
+      </div>
+      <h1 id="species-title">精神概念體：<span>愛（LOVE）</span></h1>
+      <p class="subtitle" id="species-subtitle">人類消失 5000 年後 ｜ 強效同化・生命熾熱燃燒與共鳴之核</p>
+    </header>
+
+    <!-- 愛 (Love) 屬性卡 -->
+    <div class="info-card" id="love-info">
+      <div class="stat-row">
+        <span class="label">物種核心</span>
+        <span class="val highlight-gold">強效同化 ｜ 高能量消耗代謝</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">生存矛盾</span>
+        <span class="val">向外包覆同化需耗費極大能量，極渴求覓食</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">覓食方式</span>
+        <span class="val">高頻吸取古代文明遺留之音樂、誓言與情感結晶</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">當前能量</span>
+        <span class="val status-active" id="love-energy-text">能量充沛 (100%)・心跳強烈</span>
+      </div>
+    </div>
+
+    <!-- 羞恥 (Shame) 屬性卡 -->
+    <div class="info-card" id="shame-info" style="display: none;">
+      <div class="stat-row">
+        <span class="label">核心特徵</span>
+        <span class="val highlight-pink">碰觸自動解體 ｜ 移開自動重組</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">心理機制</span>
+        <span class="val">極度畏懼被注視與觸摸，自毀性迴避</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">色彩反應</span>
+        <span class="val">平時幽微淡粉，受刺激時泛紅發熱</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">即時感知</span>
+        <span class="val status-active" id="current-state-text">未受干擾・自我封閉保護中</span>
+      </div>
+    </div>
+
+    <!-- 虛無 (Void) 屬性卡 -->
+    <div class="info-card" id="void-info" style="display: none;">
+      <div class="stat-row">
+        <span class="label">分類屬性</span>
+        <span class="val highlight-blue">中立概念生物（秩序・遺忘・平靜）</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">棲息環境</span>
+        <span class="val">高文明建築遺跡座標 / 空無空間</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">覓食機制</span>
+        <span class="val">吸收文字與影音遺留之殘存文明情緒</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">即時狀態</span>
+        <span class="val status-active" id="void-state-text">平穩呼吸・殘影共鳴中</span>
+      </div>
+    </div>
+
+    <!-- 七大罪 (Seven Sins) 群居共生生態屬性卡 -->
+    <div class="info-card sins-card" id="sins-info" style="display: none;">
+      <!-- 七罪導航選單 -->
+      <div class="sins-nav-bar">
+        <button class="sin-nav-btn active" data-sin="all">🌌 全群總覽</button>
+        <button class="sin-nav-btn" data-sin="pride">👑 傲慢</button>
+        <button class="sin-nav-btn" data-sin="greed">🪙 貪婪</button>
+        <button class="sin-nav-btn" data-sin="wrath">🔥 暴怒</button>
+        <button class="sin-nav-btn" data-sin="envy">🐍 嫉妒</button>
+        <button class="sin-nav-btn" data-sin="lust">🌸 慾</button>
+        <button class="sin-nav-btn" data-sin="gluttony">🍖 暴食</button>
+        <button class="sin-nav-btn" data-sin="sloth">🦥 怠慢</button>
+      </div>
+
+      <!-- 當前選中罪孽詳細數據 -->
+      <div class="sin-detail-box" id="sin-detail-box">
+        <div class="stat-row">
+          <span class="label">群居焦點</span>
+          <span class="val highlight-gold" id="sin-target-name">七位一體共生生態群落</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">生態定位</span>
+          <span class="val" id="sin-role-text">相互寄生・制衡・互為食物鏈與情緒源</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">形態特徵</span>
+          <span class="val" id="sin-morph-text">七個不同情緒頻率的幾何精神體共生群居</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">覓食/互動</span>
+          <span class="val" id="sin-forage-text">彼此吸收散溢情緒微粒，構成封閉能量循環</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">即時罪態</span>
+          <span class="val status-active" id="sin-state-text">生態平衡・7 隻生命體共生共鳴中</span>
+        </div>
+      </div>
+
+      <!-- 七大罪群落各成員速覽清單 (同一欄分別清楚標示各自資訊) -->
+      <div class="sins-members-list">
+        <div class="sin-chip active" data-sin="all" title="點擊切換全群視野">
+          <span class="chip-icon">🌌</span>
+          <div class="chip-info">
+            <span class="chip-name">全群生態網 (All Sins)</span>
+            <span class="chip-desc">7 體共生 ｜ 閉環生態平衡</span>
+          </div>
+        </div>
+        <div class="sin-chip" data-sin="pride" title="點擊對焦傲慢">
+          <span class="chip-icon">👑</span>
+          <div class="chip-info">
+            <span class="chip-name">傲慢 (Pride)</span>
+            <span class="chip-desc">金冠晶核 ｜ 殖群頂端支配者</span>
+          </div>
+        </div>
+        <div class="sin-chip" data-sin="greed" title="點擊對焦貪婪">
+          <span class="chip-icon">🪙</span>
+          <div class="chip-info">
+            <span class="chip-name">貪婪 (Greed)</span>
+            <span class="chip-desc">聚斂爪帶 ｜ 資源吸積聚集體</span>
+          </div>
+        </div>
+        <div class="sin-chip" data-sin="wrath" title="點擊對焦暴怒">
+          <span class="chip-icon">🔥</span>
+          <div class="chip-info">
+            <span class="chip-name">暴怒 (Wrath)</span>
+            <span class="chip-desc">赤紅刺核 ｜ 群落熱能引爆者</span>
+          </div>
+        </div>
+        <div class="sin-chip" data-sin="envy" title="點擊對焦嫉妒">
+          <span class="chip-icon">🐍</span>
+          <div class="chip-info">
+            <span class="chip-name">嫉妒 (Envy)</span>
+            <span class="chip-desc">毒青莫比烏斯 ｜ 陰影監視寄生</span>
+          </div>
+        </div>
+        <div class="sin-chip" data-sin="lust" title="點擊對焦慾">
+          <span class="chip-icon">🌸</span>
+          <div class="chip-info">
+            <span class="chip-name">慾 (Lust)</span>
+            <span class="chip-desc">洋紅雙螺旋 ｜ 費洛蒙共振傳導</span>
+          </div>
+        </div>
+        <div class="sin-chip" data-sin="gluttony" title="點擊對焦暴食">
+          <span class="chip-icon">🍖</span>
+          <div class="chip-info">
+            <span class="chip-name">暴食 (Gluttony)</span>
+            <span class="chip-desc">吞噬巨口 ｜ 代謝胃囊消化腔</span>
+          </div>
+        </div>
+        <div class="sin-chip" data-sin="sloth" title="點擊對焦怠慢">
+          <span class="chip-icon">🦥</span>
+          <div class="chip-info">
+            <span class="chip-name">怠慢 (Sloth)</span>
+            <span class="chip-desc">灰藍傘裙 ｜ 生態基底減震錨</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 互動指引浮標 (羞恥專用) -->
+    <div class="interaction-prompt" id="interaction-prompt" style="display: none;">
+      <span class="pulse-dot"></span>
+      <span class="prompt-text">👉 <b>把滑鼠游標移到它身上（碰碰它）</b>，觀察自動解體反應！</span>
+    </div>
+
+    <!-- 技能指令控制面板 -->
+    <div class="actions-panel" id="actions-panel">
+      <h3 id="panel-title">愛・行為與能量指令</h3>
+
+      <!-- 愛 (Love) 指令群 -->
+      <div id="love-actions" class="btn-grid">
+        <button id="btn-love-assimilate" class="action-btn">
+          <span class="icon">💖</span>
+          <span class="btn-text">光之抱擁 (強效同化)</span>
+          <small>光絲伸展包覆萬物，大幅消耗能量</small>
+        </button>
+        <button id="btn-love-feed" class="action-btn">
+          <span class="icon">✨</span>
+          <span class="btn-text">渴望覓食 (吸收文明情緒)</span>
+          <small>高速匯聚情感殘影微粒，填補心核</small>
+        </button>
+        <button id="btn-love-burnout" class="action-btn">
+          <span class="icon">🥀</span>
+          <span class="btn-text">過度耗損 (能量枯竭)</span>
+          <small>因無止境付出而光輝暗淡，微弱苟延</small>
+        </button>
+      </div>
+
+      <!-- 羞恥指令群 -->
+      <div id="shame-actions" class="btn-grid" style="display: none;">
+        <button id="btn-shame-disperse" class="action-btn">
+          <span class="icon">💔</span>
+          <span class="btn-text">自毀解體 (爆發)</span>
+          <small>極度羞赧，防護花瓣全面散逸</small>
+        </button>
+        <button id="btn-shame-reassemble" class="action-btn">
+          <span class="icon">🛡️</span>
+          <span class="btn-text">緊縮護核 (重組)</span>
+          <small>解除驚嚇，碎片回捲閉合</small>
+        </button>
+        <button id="btn-shame-flush" class="action-btn">
+          <span class="icon">😳</span>
+          <span class="btn-text">情緒泛紅激發</span>
+          <small>溫度躍升，微光泛出熾熱深紅</small>
+        </button>
+      </div>
+
+      <!-- 虛無指令群 -->
+      <div id="void-actions" class="btn-grid" style="display: none;">
+        <button id="btn-void-disperse" class="action-btn">
+          <span class="icon">✨</span>
+          <span class="btn-text">分散再聚合</span>
+          <small>形體崩解散逸後引力回聚</small>
+        </button>
+        <button id="btn-void-devour" class="action-btn">
+          <span class="icon">🌌</span>
+          <span class="btn-text">包覆吞噬</span>
+          <small>擴展事象地平面空間褶皺</small>
+        </button>
+        <button id="btn-void-assimilate" class="action-btn">
+          <span class="icon">💠</span>
+          <span class="btn-text">共鳴同化</span>
+          <small>光譜激發與情緒頻率同步</small>
+        </button>
+        <button id="btn-void-teleport" class="action-btn">
+          <span class="icon">⚡</span>
+          <span class="btn-text">維度瞬移</span>
+          <small>折疊虛空塌縮重組</small>
+        </button>
+      </div>
+
+      <!-- 七大罪群落生態指令群 -->
+      <div id="sins-actions" class="btn-grid" style="display: none;">
+        <button id="btn-sins-frenzy" class="action-btn">
+          <span class="icon">🩸</span>
+          <span class="btn-text">罪孽狂宴 (全體過載)</span>
+          <small>七罪本能全面爆發，光譜振幅劇烈狂暴</small>
+        </button>
+        <button id="btn-sins-swarm" class="action-btn">
+          <span class="icon">🌀</span>
+          <span class="btn-text">群聚漩渦 (向心聚合)</span>
+          <small>七隻生物向中心螺旋聚攏，緊密共生</small>
+        </button>
+        <button id="btn-sins-traits" class="action-btn">
+          <span class="icon">⚡</span>
+          <span class="btn-text">個體異態激發 (專屬特徵)</span>
+          <small>傲慢揚冠、貪婪掠奪、暴怒噴發、暴食吞嚥等</small>
+        </button>
+        <button id="btn-sins-balance" class="action-btn">
+          <span class="icon">⚖️</span>
+          <span class="btn-text">生態平衡調和 (回歸軌道)</span>
+          <small>緩解衝突，回歸自然懸浮與平穩共鳴層次</small>
+        </button>
+      </div>
+    </div>
+
+    <footer class="hud-footer">
+      <div class="controls-hint">
+        <span>🖱️ <b>按住滑鼠左鍵</b>：360° 環繞旋轉</span>
+        <span>🔍 <b>滾輪</b>：拉近 / 拉遠</span>
+        <span>🖱️ <b>右鍵</b>：平移視野</span>
+        <span id="hover-hint-text">💡 <b>點擊指令</b>：測試同化、覓食與能量衰減機制</span>
+      </div>
+      <button id="btn-reset-cam" class="secondary-btn">重置視角</button>
+    </footer>
+  </div>
+
+  <script src="sketch.js"></script>
+</body>
+</html>
