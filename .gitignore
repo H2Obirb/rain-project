@@ -1,0 +1,3 @@
+node_modules/
+DEBUG_STATUS.json
+*.log

@@ -38,3 +38,119 @@
 
 - （例：新題目 → 先開研究 → 選型表 → 小實驗 → 再開始做）
 - （例：卡關超過 30 分鐘 → 把錯誤訊息完整貼給你 → 先解釋再修）
+
+## 效率工具配方（2026/11/05 裝，輕量三件套）
+
+> 原則：不抓額外瀏覽器（用本機 Chrome），套件合計約 4MB。工具裝在專案 `devDependencies`，截圖腳本在 `tools/shot.js`。
+
+### 1. 本地預覽（存檔即自動重刷）
+
+```powershell
+# 在 rain-project 根目錄
+npm run serve
+# 等同 npx live-server m2-species --port=3001 --no-browser
+# 開 http://127.0.0.1:3001 改 sketch.js／style.css 存檔就刷
+# （3000 可能被舊 local_server.js 佔用，故用 3001）
+```
+
+- 取代舊的 `m2-species/local_server.js`（可留著備用，但優先用 live-server）
+- 之後其他站：`npm run serve` 前把 script 路徑換成該站資料夾，或直接 `npx live-server m1-world --port=3000 --no-browser`
+
+### 2. 穩定截圖（puppeteer-core，一次到位）
+
+```powershell
+# 在 rain-project 根目錄；伺服器要先開著
+node tools/shot.js "http://127.0.0.1:3001/" "C:\Users\annaj\AppData\Local\Temp\opencode\my-shot.png" 5000
+# 參數：<url> <輸出png路徑> [等待毫秒，預設4000]
+```
+
+規則：
+- **一定要先 `npm run serve` 再截**，不要截 `file://`（字型／CDN 可能被擋）
+- WebGL 場景（three.js）等待至少 **4000–8000ms** 再拍
+- 截圖路徑一律用 `C:\Users\annaj\AppData\Local\Temp\opencode\`，別放專案裡
+- **絕不**連到使用者正在用的瀏覽器視窗；本腳本開的是獨立 headless 實例，安全
+
+### 3. chrome-devtools-mcp（opencode 已掛）
+
+- 已寫進 `~/.config/opencode/opencode.jsonc`：獨立 profile、headless、指向本機 Chrome
+- **重啟 opencode 後生效**；生效後我可直接用 MCP 工具開頁、截圖、看 console，不必再組 shell
+- 使用者規則不變：另開實例，不碰你的分頁
+
+### 安裝來源（GitHub，研究紀錄）
+
+| 工具 | Repo | 授權 |
+|------|------|------|
+| puppeteer-core | puppeteer/puppeteer | Apache-2.0 |
+| live-server | tapio/live-server | MIT |
+| chrome-devtools-mcp | ChromeDevTools/chrome-devtools-mcp | Apache-2.0 |
+
+## 除錯工作流（2026/11/11 裝：逐行 debug ＋ 紅綠黃標註）
+
+> 目標有兩個：**① 真的能一行一行跑**；**② 修過的東西不會被忘記**。
+> 兩件事都由開源工具撐：`vscode-js-debug`（VS Code 內建）、`better-comments`、`todo-tree`、`todo-highlight`（VS Code 擴充套件）、`puppeteer-core` 的 CDP Debugger domain（本專案自寫 `tools/step-debug.js`）。
+
+### A. 逐行 debug
+
+**你（人）用 VS Code：**
+
+1. 先 `npm run serve`（服務 repo 根，頁面在 `http://127.0.0.1:3001/m2-species/`）
+2. VS Code 按 `F5`，右上角選「逐行 debug：m2-species（開獨立 Chrome）」
+3. 在 `sketch.js` 點行號左邊下斷點 → `F10` 逐行執行／`F11` 進入函式／`Shift+F11` 跳出，左邊面板看 Locals 與 Call Stack
+4. 設定檔在 `.vscode/launch.json`（已含 m1-world／m2-species 兩組）
+
+> VS Code 內建的 JavaScript Debugger 就是 `microsoft/vscode-js-debug`（MIT），不用另外裝。
+
+**我（AI）用指令稿：**
+
+```powershell
+node tools/step-debug.js http://127.0.0.1:3001/m2-species/ m2-species/sketch.js:275 --max 12
+node tools/step-debug.js <url> <檔案:行號> --until 3150     # 逐步走到某一行
+node tools/step-debug.js <url> <檔案:行號> --mode into      # 改成逐步「進入」
+node tools/step-debug.js <url> --watch                     # 抓程式碼裡的 debugger; 陳述句
+node tools/step-debug.js <url> <檔案:行號> --out trace.json # 輸出完整 trace 給我讀
+```
+
+- 原理：Chrome DevTools Protocol 的 `Debugger` domain → `setBreakpointByUrl` 下斷點 → `stepOver/stepInto/stepOut`
+- 每停一行就印出「行號 + 那一行的原始碼 + 當下區域變數的值」，最後可輸出 JSON trace
+- 開的是**獨立 headless Chrome**，絕不碰你正在用的瀏覽器分頁
+
+### B. 紅綠黃標註（已修正／待修正／未修正）
+
+**標記格式**（寫在原始碼的行內註解，VS Code 會自動上色）：
+
+| 顏色 | 寫法 | 意思 |
+|---|---|---|
+| 🟢 綠 | `// FIXED-001: 說明` | 已修正並驗證過；**改壞了要回來看這裡** |
+| 🟡 黃 | `// TODO-001: 說明` | 待修正，已知但還沒排到 |
+| 🔴 紅 | `// BUG-001: 說明` | 已知未修正／需要重做 |
+
+**指令：**
+
+```powershell
+npm run fix-status     # 重建 DEBUG_STATUS.md ＋ DEBUG_STATUS.json（改完程式必跑）
+npm run fix-list       # 在終端機列出所有項目
+npm run fix-pending    # 只列出紅／黃（還沒解決的）
+npm run fix-verify     # 只列出「本次改動過的檔案」裡已修正的項目 → 回頭重驗
+```
+
+- `DEBUG_STATUS.md` 是**自動產生**的總表（紅／黃／綠三段＋逐檔案索引），不要手改；要改就改原始碼裡的標記
+- VS Code 側：`better-comments` 上色、`todo-tree` 在左側列出全部標記（按檔案或按標籤分組）、`todo-highlight` 在大綱標示
+
+### C. 我（AI）除錯時的鐵律
+
+1. **動手前**先讀 `DEBUG_STATUS.md`，知道上一次修到哪、還欠哪些
+2. **每修一個點**，就在那一行（或緊鄰的那行）加標記：修好且驗證過 → `FIXED-nnn`；還沒修 → `BUG-nnn`／`TODO-nnn`
+3. **每輪改完**跑 `npm run fix-status` 重建總表
+4. **收尾前**跑 `npm run fix-verify` → 把「本次改過的檔案裡面已修正的項目」重新驗一次，**避免修了後面忘了前面**
+5. 跨 session 的記憶另外存進 LongMemory（`longmemory` MCP），所以新開一個 session 也接得上前面的進度
+
+### 安裝來源（GitHub，研究紀錄）
+
+| 工具 | Repo | 授權 | 用在哪 |
+|------|------|------|--------|
+| vscode-js-debug | microsoft/vscode-js-debug | MIT | VS Code 內建的 JavaScript 逐行 debugger |
+| better-comments | aaron-bond/better-comments | MIT | 紅／綠／黃行內上色（1000 萬+ 安裝） |
+| todo-tree | Gruntfuggly/todo-tree | MIT | 左側樹狀檢視全部標記 |
+| todo-highlight | wayou/vscode-todo-highlight | MIT | 大綱標示 TODO/FIXME |
+| puppeteer-core | puppeteer/puppeteer | Apache-2.0 | `tools/step-debug.js` 的 CDP 逐行引擎 |
+

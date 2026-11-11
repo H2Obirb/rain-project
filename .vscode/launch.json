@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "逐行 debug：m2-species（開獨立 Chrome）",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:3001/m2-species/",
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true,
+      "pauseForSourceMap": true,
+      "timeout": 60000
+    },
+    {
+      "name": "逐行 debug：附加到 9222（自己開的 Chrome）",
+      "type": "chrome",
+      "request": "attach",
+      "port": 9222,
+      "url": "http://127.0.0.1:3001/m2-species/",
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true,
+      "timeout": 60000
+    },
+    {
+      "name": "逐行 debug：m1-world",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:3001/m1-world/",
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true,
+      "timeout": 60000
+    }
+  ],
+  "compounds": []
+}

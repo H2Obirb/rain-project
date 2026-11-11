@@ -1,0 +1,898 @@
+/* ============================================================
+   M2 物種 HUD v4.2 — 像素風 UI（紙底 parchment ＋繁中像素字）
+   參考：
+   - nostalgic-css/NES.css（21.8k★, MIT）：直角、粗黑邊、硬陰影、
+     Press Start 2P。這裡借它的視覺語彙自己實作（不整包引入）。
+   - 像素 RPG 紙底慣例（Pokémon／Stardew 對話框、羊皮紙選單）：
+     米黃紙底＋深褐文字＋黑邊硬陰影，取代全黑面板。
+   - halfmage/pixelarticons（MIT）：24×24 像素圖示（.px-icon）。
+   - SolidZORO/zpix-pixel-font（3.1k★, Zpix 最像素）：繁中像素字，
+     12px 設計尺寸（用 12/24px 整數倍最銳利）。教育專案免費。
+     本地檔 fonts/zpix.woff2。
+   ============================================================ */
+
+/* ---- Zpix 繁中像素字體（本地 woff2） ---- */
+@font-face {
+  font-family: "Zpix";
+  src: url("fonts/zpix.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* ---- 字體：英文數字用 Press Start 2P，繁中用 Zpix ---- */
+  --font-cjk: "Zpix", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei UI",
+    "Microsoft JhengHei", "Heiti TC", -apple-system, sans-serif;
+  --font-pixel: "Press Start 2P", "Zpix", "JetBrains Mono", monospace;
+  --font-mono: "JetBrains Mono", "Zpix", ui-monospace, "SFMono-Regular", Menlo,
+    Consolas, monospace;
+
+  /* ---- 字級（Zpix 12px 基準：小字 12、標題 24） ---- */
+  --fs-micro: 12px;
+  --fs-label: 12px;
+  --fs-base: 12px;
+  --fs-body: 12px;
+  --fs-title: 24px;
+  --fs-display: 24px;
+
+  /* ---- 間距（4px grid） ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+
+  /* ---- 幾何：像素＝直角，全部 0 圓角 ---- */
+  --radius: 0;
+  --radius-lg: 0;
+
+  /* ---- 紙底像素面板：米黃紙＋深褐邊＋硬陰影（Pokémon/Stardew 慣例） ---- */
+  --ink: #2b2115;                 /* 深褐近黑：邊框、陰影 */
+  --line: 3px solid var(--ink);
+  --panel-bg: #f6ecd4;            /* 主紙面 */
+  --panel-bg-2: #efe2c2;          /* 次紙面（按面（按鈕、鍵帽） */
+  --panel-bg-3: #e6d5ae;          /* 紙面陰影處（hover 前） */
+  --panel-shadow: 4px 4px 0 rgba(43, 33, 21, 0.4);
+  --panel-inset: inset 0 0 0 1px rgba(255, 252, 240, 0.7);
+
+  /* ---- 文字色階（紙上深褐墨水） ---- */
+  --text-1: #3b2e1a;
+  --text-2: #6e5c3c;
+  --text-3: #9a8660;
+
+  /* ---- 動態：像素感用 steps，不用平滑曲線 ---- */
+  --ease: steps(4, end);
+
+  /* ---- 主題預設（愛）---- */
+  --accent: #c2740a;              /* 紙上可讀的深琥珀（原 f59e0b 在紙上太淡） */
+  --accent-2: #b03060;
+  --accent-rgb: 194, 116, 10;
+  --glow: rgba(194, 116, 10, 0.4);
+}
+
+/* 主題色票：JS 只切 class，全部配色掛在這裡（紙底深色版） */
+.love-theme {
+  --accent: #c2740a;
+  --accent-2: #b03060;
+  --accent-rgb: 194, 116, 10;
+}
+
+/* ---- 場景底色連動：深色場景（羞恥／虛無／七大罪）→ 紙底加深、文字轉亮 ----
+   body.scene-* 管沒掛主題 class 的元素（未選取的 tab、對話框等）；
+   .shame-theme 等管有掛 class 的面板，兩邊 token 必須一致 */
+body.scene-shame,
+.shame-theme {
+  --panel-bg: #352430;
+  --panel-bg-2: #412e3a;
+  --panel-bg-3: #2a1c26;
+  --ink: #120a10;
+  --panel-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  --panel-inset: inset 0 0 0 1px rgba(255, 214, 230, 0.08);
+  --text-1: #f6e7ee;
+  --text-2: #cfa9bb;
+  --text-3: #a3808f;
+  --accent: #ef3d72;
+  --accent-2: #ff7aa2;
+  --accent-rgb: 239, 61, 114;
+  --glow: rgba(239, 61, 114, 0.45);
+}
+
+body.scene-void,
+.void-theme {
+  --panel-bg: #232040;
+  --panel-bg-2: #2d2952;
+  --panel-bg-3: #1a1834;
+  --ink: #0b0a18;
+  --panel-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  --panel-inset: inset 0 0 0 1px rgba(214, 209, 255, 0.08);
+  --text-1: #ebe8fb;
+  --text-2: #b3aed6;
+  --text-3: #8b84ad;
+  --accent: #8d84f2;
+  --accent-2: #a78bfa;
+  --accent-rgb: 141, 132, 242;
+  --glow: rgba(141, 132, 242, 0.45);
+}
+
+body.scene-sins,
+.sins-theme {
+  --panel-bg: #202a22;
+  --panel-bg-2: #29352b;
+  --panel-bg-3: #171f19;
+  --ink: #080d0a;
+  --panel-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  --panel-inset: inset 0 0 0 1px rgba(224, 240, 214, 0.07);
+  --text-1: #ecead8;
+  --text-2: #b7b49b;
+  --text-3: #8a8770;
+  --accent: #d9a13a;
+  --accent-2: #e05a3a;
+  --accent-rgb: 217, 161, 58;
+  --glow: rgba(217, 161, 58, 0.45);
+}
+
+/* 深色紙底上的高亮字：改亮色確保可讀 */
+body.scene-shame .highlight-pink,
+.shame-theme .highlight-pink {
+  color: #ffd2e0 !important;
+  background: rgba(239, 61, 114, 0.22);
+}
+body.scene-void .highlight-blue,
+.void-theme .highlight-blue {
+  color: #cfe9ff !important;
+  background: rgba(96, 165, 250, 0.22);
+}
+body.scene-sins .highlight-gold,
+.sins-theme .highlight-gold {
+  color: #ffe1a3 !important;
+  background: rgba(217, 161, 58, 0.22);
+}
+body.scene-shame .status-active.burnout,
+.shame-theme .status-active.burnout,
+body.scene-void .status-active.burnout,
+.void-theme .status-active.burnout,
+body.scene-sins .status-active.burnout,
+.sins-theme .status-active.burnout {
+  color: #b5ab8e !important;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: var(--font-cjk);
+  line-height: 1.5;
+  user-select: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #060308;
+  color: var(--text-1);
+  /* Zpix 像素字銳利化：關平滑、用幾何渲染 */
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  text-rendering: geometricPrecision;
+}
+
+#canvas-container {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+/* ============================================================
+   像素圖示（pixelarticons, MIT © Gerrit Halfmann）
+   24×24 網格、純方塊、currentColor 上色
+   ============================================================ */
+.px-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  fill: currentColor;
+  shape-rendering: crispEdges;
+  display: inline-block;
+  vertical-align: -3px;
+}
+
+/* ============================================================
+   HUD 骨架：四角 zone 佈局（中央留給 3D 場景）
+   ┌──────── 左上 identity ── 上中 tabs ┐
+   │                                    │
+   │                                    │ 右 actions
+   └──────── 左下 data ────── 底 footer ┘
+   ============================================================ */
+#ui-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+#ui-overlay > * {
+  pointer-events: auto;
+}
+
+/* HUD 面板共用底：像素紙面板＝米黃紙底＋深褐邊＋硬陰影＋內亮線 */
+.hud-header,
+.info-card,
+.actions-panel,
+.hud-footer,
+.species-selector {
+  background: var(--panel-bg);
+  border: var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--panel-shadow), var(--panel-inset);
+  position: relative;
+  image-rendering: pixelated;
+}
+
+/* ============================================================
+   左上：身分識別區
+   ============================================================ */
+.hud-header {
+  position: absolute;
+  top: var(--sp-5);
+  left: var(--sp-5);
+  max-width: 400px;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  animation: hudIn 0.4s var(--ease) both;
+}
+
+/* 像素徽章：實色塊＋深褐邊＋硬陰影（中文用 Zpix 12px） */
+.badge {
+  display: inline-block;
+  font-family: var(--font-cjk);
+  font-size: var(--fs-base);
+  letter-spacing: 0.08em;
+  color: #fdf8ec;
+  background: var(--accent);
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 rgba(43, 33, 21, 0.4);
+  padding: 3px 10px;
+  margin-bottom: var(--sp-2);
+  border-radius: var(--radius);
+}
+
+.hud-header h1 {
+  font-size: var(--fs-display);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: var(--text-1);
+  line-height: 1.35;
+}
+
+.hud-header h1 span {
+  color: var(--accent);
+}
+
+.subtitle {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  letter-spacing: 0.03em;
+}
+
+/* ============================================================
+   上中：物種切換（EN 像素小字 + 中文大字）
+   ============================================================ */
+.species-selector {
+  position: absolute;
+  top: var(--sp-5);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0;                        /* 像素分段控制：按鈕相連 */
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  animation: hudIn 0.4s var(--ease) 0.06s both;
+}
+
+.tab-btn {
+  background: var(--panel-bg-2);
+  border: 3px solid var(--ink);
+  box-shadow: var(--panel-shadow), var(--panel-inset);
+  border-radius: var(--radius);
+  padding: 6px 16px 7px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  margin-right: -3px;            /* 相鄰邊框重疊，長條分段控制 */
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+.tab-btn:last-child { margin-right: 0; }
+
+.tab-en {
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  letter-spacing: 0.12em;
+  color: var(--text-3);
+}
+
+.tab-tc {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: 0.08em;
+}
+
+.tab-btn:hover .tab-tc { color: var(--accent); }
+.tab-btn:hover .tab-en { color: var(--text-2); }
+
+.tab-btn.active {
+  background: var(--accent);
+  border-color: var(--ink);
+}
+.tab-btn.active .tab-tc { color: #fdf8ec; }
+.tab-btn.active .tab-en { color: rgba(253, 248, 236, 0.8); }
+
+.tab-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   左下：數據讀值卡
+   ============================================================ */
+.hud-left-bottom {
+  position: absolute;
+  left: var(--sp-5);
+  bottom: 70px;
+  width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  pointer-events: none !important; /* 容器不擋場景，只有卡片本身可互動 */
+}
+.hud-left-bottom > * { pointer-events: auto; }
+
+.info-card {
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: hudIn 0.4s var(--ease) 0.1s both;
+}
+
+/* 卡片標頭：像素字小標＋像素虛線分隔 */
+.card-head {
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+  padding-bottom: 8px;
+  border-bottom: 3px dashed rgba(var(--accent-rgb), 0.45);
+  margin-bottom: 2px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-3);
+  font-size: var(--fs-base);
+}
+
+.stat-row .label {
+  font-family: var(--font-cjk);
+  font-size: var(--fs-base);
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.stat-row .val {
+  font-weight: 500;
+  color: var(--text-1);
+  text-align: right;
+}
+
+/* 像素風高亮：不用柔光 text-shadow，改實色＋方塊底 */
+.highlight-gold { color: #8a5a00 !important; background: rgba(245, 158, 11, 0.25); padding: 0 4px; }
+.highlight-pink { color: #a01838 !important; background: rgba(244, 63, 94, 0.18); padding: 0 4px; }
+.highlight-blue { color: #0b6e99 !important; background: rgba(14, 165, 233, 0.18); padding: 0 4px; }
+
+.status-active {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-weight: 700;
+  transition: color 0.2s;
+}
+.status-active.burnout { color: #8a7a5c !important; }
+.status-active.ashamed {
+  color: #b91c1c !important;
+  animation: blink 0.8s steps(2, end) infinite;
+}
+
+/* ============================================================
+   像素 HP 條（參考 Pokémon 血條：深褐框＋紙槽底＋分段格線＋低血變色）
+   ============================================================ */
+.pixel-bar {
+  margin-top: 4px;
+  height: 12px;
+  background: var(--panel-bg-3);
+  border: 2px solid var(--ink);
+  box-shadow: inset 0 0 0 1px rgba(255, 252, 240, 0.55);
+  padding: 2px;
+  position: relative;
+}
+
+.pixel-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  transition: width 0.45s var(--ease), background 0.2s;
+  /* 分段格線：每 8px 一條褐線，像像素血條的格子 */
+  background-image: linear-gradient(
+    90deg,
+    var(--accent) 0 6px,
+    rgba(43, 33, 21, 0.3) 6px 8px
+  );
+  background-size: 8px 100%;
+}
+.pixel-bar-fill.mid {
+  background-image: linear-gradient(
+    90deg,
+    #c2740a 0 6px,
+    rgba(43, 33, 21, 0.3) 6px 8px
+  );
+}
+.pixel-bar-fill.low {
+  background-image: linear-gradient(
+    90deg,
+    #b91c1c 0 6px,
+    rgba(43, 33, 21, 0.3) 6px 8px
+  );
+  animation: blink 0.8s steps(2, end) infinite; /* 低能量警示閃爍 */
+}
+
+/* ============================================================
+   右側：指令控制台（編號按鈕）
+   ============================================================ */
+.actions-panel {
+  position: absolute;
+  right: var(--sp-5);
+  top: var(--sp-5);
+  width: 296px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  padding: var(--sp-3);
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+  animation: hudInR 0.4s var(--ease) 0.08s both;
+}
+.actions-panel::-webkit-scrollbar { width: 8px; }
+.actions-panel::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border: 2px solid var(--ink);
+}
+
+.actions-panel h3 {
+  font-family: var(--font-cjk);
+  font-size: var(--fs-base);
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: var(--sp-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.actions-panel h3::after {
+  content: "";
+  flex: 1;
+  height: 3px;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(var(--accent-rgb), 0.55) 0 6px,
+    transparent 6px 10px
+  ); /* 像素點線 */
+}
+
+.btn-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 像素按鈕：紙面＋深褐邊＋硬陰影；hover 平移「蓋住」陰影＝按下去的感覺 */
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  background: var(--panel-bg-2);
+  border: 3px solid var(--ink);
+  box-shadow: 4px 4px 0 rgba(43, 33, 21, 0.4), var(--panel-inset);
+  border-radius: var(--radius);
+  padding: 9px 12px 9px 28px;     /* 左側留給 ▶ 選擇游標 */
+  cursor: pointer;
+  text-align: left;
+  position: relative;
+  transition: transform 0.1s steps(2, end), box-shadow 0.1s steps(2, end),
+    background 0.15s;
+}
+
+/* 選擇游標：參考 Pokémon 選單，hover 時左側出現閃爍 ▶ */
+.action-btn::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: translateY(-50%);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid var(--accent);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.action-btn:hover::after,
+.action-btn:focus-visible::after {
+  opacity: 1;
+  animation: blink 0.6s steps(2, end) infinite;
+}
+
+/* 按鈕編號：像素字序號 */
+.action-btn::before {
+  counter-increment: btnidx;
+  content: counter(btnidx, decimal-leading-zero);
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  color: var(--text-3);
+  flex-shrink: 0;
+  width: 22px;
+  transition: color 0.15s;
+}
+.btn-grid { counter-reset: btnidx; }
+
+.action-btn:hover {
+  background: var(--panel-bg-3);
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 rgba(43, 33, 21, 0.4), var(--panel-inset);
+}
+.action-btn:hover::before { color: var(--accent); }
+.action-btn:active {
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 rgba(43, 33, 21, 0.4), var(--panel-inset);
+}
+.action-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.action-btn.feeding {
+  background: var(--accent);
+  color: #fdf8ec;
+}
+.action-btn.feeding .btn-text { color: #fdf8ec; }
+.action-btn.feeding small { color: rgba(253, 248, 236, 0.85); }
+
+.action-btn .icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+  border: 2px solid rgba(var(--accent-rgb), 0.55);
+  border-radius: var(--radius);
+}
+.action-btn .icon .px-icon { width: 20px; height: 20px; }
+
+.btn-body { flex: 1; min-width: 0; }
+
+.action-btn .btn-text {
+  display: block;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: 0.04em;
+}
+.action-btn small {
+  display: block;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================================
+   互動浮標（羞恥）：Pokémon 對話框式（深褐外框＋雙線＋三角箭頭）
+   ============================================================ */
+.interaction-prompt {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--panel-bg-2);
+  border: 3px solid var(--ink);
+  outline: 3px solid var(--ink);   /* Pokémon 式雙層框 */
+  outline-offset: -7px;
+  box-shadow: 3px 3px 0 rgba(43, 33, 21, 0.4);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  position: relative;
+  animation: floatBounce 1.2s steps(4, end) infinite;
+}
+
+/* 對話框右下角閃爍三角：「還有話說」的像素慣例 */
+.interaction-prompt::after {
+  content: "";
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid var(--text-1);
+  animation: blink 0.7s steps(2, end) infinite;
+}
+
+.pulse-dot {
+  width: 10px;
+  height: 10px;
+  background: #c22550;
+  border: 2px solid var(--ink);
+  box-shadow: 0 0 0 1px #c22550;
+  animation: pulseDot 0.8s steps(2, end) infinite;
+  flex-shrink: 0;
+}
+
+.prompt-text {
+  font-size: var(--fs-base);
+  color: var(--text-1);
+}
+.prompt-text b { color: var(--text-1); }
+
+/* ============================================================
+   底部：操作列
+   ============================================================ */
+.hud-footer {
+  position: absolute;
+  bottom: var(--sp-5);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  animation: hudIn 0.4s var(--ease) 0.14s both;
+}
+
+.controls-hint {
+  display: flex;
+  gap: var(--sp-4);
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  flex-wrap: wrap;
+}
+
+.hint-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* 像素鍵帽：小方塊＋下緣粗邊（紙面深一階） */
+.kbd {
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  color: var(--text-1);            /* 深色紙底時跟著轉亮（原 var(--ink) 在暗底上看不見） */
+  background: var(--panel-bg-3);
+  border: 2px solid var(--ink);
+  border-bottom-width: 3px;
+  border-radius: var(--radius);
+  padding: 2px 6px;
+}
+
+#hover-hint-text { color: var(--text-2); }
+#hover-hint-text .kbd { margin-right: 1px; }
+
+.secondary-btn {
+  font-family: var(--font-cjk);
+  font-size: var(--fs-base);
+  letter-spacing: 0.04em;
+  background: var(--panel-bg-2);
+  border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 rgba(43, 33, 21, 0.4), var(--panel-inset);
+  color: var(--text-2);
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.1s steps(2, end), box-shadow 0.1s steps(2, end),
+    color 0.15s;
+}
+.secondary-btn:hover {
+  color: var(--accent);
+  transform: translate(1px, 1px);
+  box-shadow: 2px 2px 0 rgba(43, 33, 21, 0.4), var(--panel-inset);
+}
+.secondary-btn:active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 rgba(43, 33, 21, 0.4), var(--panel-inset);
+}
+.secondary-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ============================================================
+   七大罪專屬
+   ============================================================ */
+.hud-left-bottom:has(#sins-info:not([style*="display: none"])) {
+  bottom: var(--sp-5);
+}
+
+.sins-card {
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #b91c1c transparent;
+}
+.sins-card::-webkit-scrollbar { width: 8px; }
+.sins-card::-webkit-scrollbar-thumb {
+  background: #b91c1c;
+  border: 2px solid var(--ink);
+}
+
+.sins-nav-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  overflow-x: visible;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.sins-nav-bar::-webkit-scrollbar { display: none; }
+
+.sin-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-cjk);
+  font-size: var(--fs-base);
+  letter-spacing: 0.02em;
+  background: var(--panel-bg-2);
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 rgba(43, 33, 21, 0.35);
+  color: var(--text-2);
+  padding: 5px 9px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  margin-right: -2px;
+  transition: all 0.1s steps(2, end);
+}
+.sin-nav-btn:hover { color: var(--text-1); background: var(--panel-bg-3); }
+.sin-nav-btn.active {
+  background: #b91c1c;
+  color: #fdf6e3;
+  z-index: 1;                    /* 換成實色時蓋住相鄰邊框 */
+}
+
+.sin-detail-box {
+  background: var(--panel-bg-3);
+  border: 3px solid var(--ink);
+  border-left: 3px solid #b91c1c;
+  box-shadow: var(--panel-inset);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 詳細數據：標籤在上、內容在下，避免左右擠壓把字切掉 */
+.sin-detail-box .stat-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.sin-detail-box .stat-row .val {
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.55;
+}
+
+.sins-members-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.sin-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--panel-bg-2);
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 rgba(43, 33, 21, 0.35), var(--panel-inset);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: transform 0.1s steps(2, end), box-shadow 0.1s steps(2, end);
+}
+.sin-chip:hover {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 rgba(43, 33, 21, 0.35), var(--panel-inset);
+}
+.sin-chip.active {
+  background: rgba(185, 28, 28, 0.16);
+  border-color: var(--accent);
+}
+.sin-chip:first-child {
+  grid-column: 1 / -1;
+  border-color: #6d28d9;
+}
+
+.chip-icon {
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+  line-height: 1;
+}
+.chip-icon .px-icon { width: 16px; height: 16px; }
+.chip-info { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.chip-name {
+  font-size: var(--fs-label);
+  font-weight: 700;
+  color: var(--text-1);
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
+}
+.chip-desc {
+  font-family: var(--font-cjk);
+  font-size: var(--fs-base);
+  color: var(--text-3);
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+/* ============================================================
+   動畫：全部用 steps()，走格子不滑順
+   ============================================================ */
+@keyframes hudIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes hudInR {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes pulseDot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.4); opacity: 0.5; }
+}
+@keyframes floatBounce {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+/* ============================================================
+   小螢幕
+   ============================================================ */
+@media (max-width: 960px) {
+  .hud-header { max-width: 300px; top: 12px; left: 12px; }
+  .species-selector { top: auto; bottom: 64px; left: 12px; transform: none; }
+  .actions-panel { width: 250px; right: 12px; top: 12px; }
+  .hud-left-bottom { left: 12px; bottom: 120px; width: 300px; }
+  .hud-footer { left: 12px; right: 12px; transform: none; bottom: 12px; }
+  .controls-hint { gap: 10px; }
+}

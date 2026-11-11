@@ -1,0 +1,55 @@
+{
+  "// 說明": "紅/綠/黃標註系統。原始碼裡寫 // FIXED-001: ... / // TODO-001: ... / // BUG-001: ... 就會自動上色。",
+  "better-comments.tags": [
+    {
+      "tag": "FIXED",
+      "color": "#2ECC40",
+      "strikethrough": false,
+      "underline": false,
+      "backgroundColor": "transparent",
+      "bold": true,
+      "italic": false
+    },
+    {
+      "tag": "TODO",
+      "color": "#E5C07B",
+      "strikethrough": false,
+      "underline": false,
+      "backgroundColor": "transparent",
+      "bold": true,
+      "italic": false
+    },
+    {
+      "tag": "BUG",
+      "color": "#E06C75",
+      "strikethrough": false,
+      "underline": false,
+      "backgroundColor": "transparent",
+      "bold": true,
+      "italic": false
+    }
+  ],
+  "better-comments.multilineComments": true,
+  "todo-tree.general.tags": [
+    {
+      "label": "🔴 未修正",
+      "search": "BUG",
+      "description": "已知但還沒解決的問題"
+    },
+    {
+      "label": "🟡 待修正",
+      "search": "TODO",
+      "description": "已排隊、還沒動工的修正"
+    },
+    {
+      "label": "🟢 已修正",
+      "search": "FIXED",
+      "description": "已修正並驗證過（改壞了要回來看這裡）"
+    }
+  ],
+  "todo-tree.highlights.customHighlight": {
+    "background": "rgba(255,0,0,0.1)"
+  },
+  "files.eol": "\n",
+  "files.insertFinalNewline": true
+}

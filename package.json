@@ -1,0 +1,32 @@
+{
+  "name": "rain-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "serve": "live-server . --port=3001 --no-browser",
+    "shot": "node tools/shot.js",
+    "fix-status": "node tools/fix-tracker.js",
+    "fix-list": "node tools/fix-tracker.js --list",
+    "fix-pending": "node tools/fix-tracker.js --pending",
+    "fix-verify": "node tools/fix-tracker.js --verify-changed",
+    "step-debug": "node tools/step-debug.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/H2Obirb/rain-project.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/H2Obirb/rain-project/issues"
+  },
+  "homepage": "https://github.com/H2Obirb/rain-project#readme",
+  "devDependencies": {
+    "chrome-devtools-mcp": "^1.12.0",
+    "live-server": "^1.2.2",
+    "puppeteer-core": "^25.16.0"
+  }
+}
