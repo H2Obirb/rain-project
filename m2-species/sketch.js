@@ -1693,22 +1693,24 @@ const LOVE_SHROUD_CLOTH_FRAG = `
     float lambert = max(dot(n, keyDir), 0.0);
     float fill = max(dot(n, fillDir), 0.0);
 
-    vec3 albedo = vec3(0.62, 0.62, 0.66);
+    // 鵝白色（比原本的冷灰亮一截，且帶一點暖奶油色，不會變成死白）
+    // FIXED-007: 使用者要求外層布殼調亮成鵝白色 → albedo 從冷灰 0.62/0.62/0.66 提到 0.88/0.87/0.83
+    vec3 albedo = vec3(0.88, 0.87, 0.83);
     vec3 keyCol = vec3(1.00, 0.96, 0.88);
     vec3 fillCol = vec3(0.55, 0.62, 0.74);
 
-    vec3 col = albedo * (0.30 + 0.22 * (n.y * 0.5 + 0.5));        // 半球環境光（給足底，不讓布變成黑團）
-    col += albedo * keyCol * lambert * 0.80;                        // 主光
-    col += albedo * fillCol * fill * 0.40;                         // 補光
+    vec3 col = albedo * (0.36 + 0.24 * (n.y * 0.5 + 0.5));        // 半球環境光（給足底，不讓布變成黑團）
+    col += albedo * keyCol * lambert * 0.85;                        // 主光
+    col += albedo * fillCol * fill * 0.45;                         // 補光
     col *= 1.0 + grain * 0.05;
 
     // 邊緣微光：勾出布的輪廓
     float rim = pow(1.0 - abs(dot(n, v)), 2.4);
-    col += vec3(0.62, 0.64, 0.74) * rim * 0.70;
+    col += vec3(0.72, 0.73, 0.80) * rim * 0.70;
 
     // 深處的假 AO：只壓暗「正中央的縱縫內壁」，不影響整體亮度
     float ao = smoothstep(0.02, 0.34, abs(vLocal.x) * 0.5 + abs(vLocal.z) * 0.4);
-    col *= mix(0.55, 1.0, ao);
+    col *= mix(0.68, 1.0, ao);
 
     // 能量狀態：耗損時整體變暗（同化時略亮）
     float energy = clamp(uIntensity / 1.2, 0.08, 2.4);
