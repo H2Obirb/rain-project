@@ -1695,14 +1695,14 @@ const LOVE_SHROUD_CLOTH_FRAG = `
 
     // 鵝白色（比原本的冷灰亮一截，且帶一點暖奶油色，不會變成死白）
     // FIXED-007: 使用者要求外層布殼調亮成鵝白色 → albedo 從冷灰 0.62/0.62/0.66 提到 0.88/0.87/0.83
-    vec3 albedo = vec3(0.88, 0.87, 0.83);
+    vec3 albedo = vec3(1.0, 0.87, 0.63);
     vec3 keyCol = vec3(1.00, 0.96, 0.88);
     vec3 fillCol = vec3(0.55, 0.62, 0.74);
 
     vec3 col = albedo * (0.36 + 0.24 * (n.y * 0.5 + 0.5));        // 半球環境光（給足底，不讓布變成黑團）
     col += albedo * keyCol * lambert * 0.85;                        // 主光
     col += albedo * fillCol * fill * 0.45;                         // 補光
-    col *= 1.0 + grain * 0.05;
+    col *= 1.0 + grain * 0.07;
 
     // 邊緣微光：勾出布的輪廓
     float rim = pow(1.0 - abs(dot(n, v)), 2.4);
