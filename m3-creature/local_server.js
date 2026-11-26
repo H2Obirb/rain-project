@@ -29,12 +29,12 @@ const MIME_TYPES = {
 
 const server = http.createServer((req, res) => {
   let reqUrl = decodeURIComponent(req.url.split('?')[0]);
-  // 首頁 → m2-species 這一站
+  // 首頁 → m3-creature 這一站
   // FIXED-005: 用 302 轉址，不要用「改寫路徑」的方式回應。
   //   改寫的話 HTML 雖然回來了，但瀏覽器仍以 / 為基準解析相對路徑
   //   → sketch.js / style.css 會變成 /sketch.js / style.css → 整頁 404、場景起不來。
   if (reqUrl === '/') {
-    res.writeHead(302, { 'Location': '/m2-species/index.html' });
+    res.writeHead(302, { 'Location': '/m3-creature/index.html' });
     res.end();
     return;
   }
@@ -73,5 +73,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Server running at http://localhost:${PORT}/m2-species/`);
+  console.log(`Server running at http://localhost:${PORT}/m3-creature/`);
 });

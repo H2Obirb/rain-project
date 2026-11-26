@@ -45,7 +45,8 @@ const loveShroudUniforms = {
 };
 let loveRelics = []; // 愛的遺物（覓食光線的連線目標）
 let loveFeedGroup = null; // 覓食光線群組（偷偷連著 loveEnvGroup，切物種自動隱藏）
-let loveFeedLines = []; // 每顆遺物一條的 THREE.Line
+let loveFeedSlots = []; // 覓食光絲槽位（只連最近的十幾顆遺物，見 buildLoveFeedSystem）
+let loveFeedPickT = 0; // 距離下次重選遺物的倒數秒數
 let isLoveFeeding = false; // 覓食狀態開關（按「渴望覓食」切換）
 let loveFeedFactor = 0; // 光線淡入淡出係數 0→1
 let loveEnvGroup; // 愛的專屬環境：廢墟住宅區
@@ -71,6 +72,18 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => {
   loveKeys[e.key.toLowerCase()] = false;
 });
+// 翅膀根部的 z：放在布殼背面（布殼 z 範圍約 -0.61~0.36）之後，從正面看不到翅膀穿出布殼
+const LOVE_WING_Z = -1.05;
+// FIXED-010: 愛的光之擁抱——原本翅膀是平面整片旋轉＋放大 4 倍（疊上整隻 1.8 倍）→ 變一面白牆、包不住身體；
+//   改成把每根羽毛沿「環繞身體的圓弧」彎過來（圓柱彎曲），羽毛轉向朝下垂成披風。驗證：展開／環抱截圖（正面、俯視、3/4）＋收回後羽毛回到原位
+// 環抱：把平面翅膀沿著「環繞身體的圓弧」彎過來（圓柱彎曲），而不是整片旋轉
+const LOVE_HUG_CURVE = 1.25;      // 完全環抱時的彎曲率（越大圓越小）；搭配放大 1.3 → 圓半徑約 1.04，貼著約 1.55 寬的身體
+const LOVE_HUG_SCALE_ADD = 0.3;   // 環抱時翅膀放大（整隻愛本身另有 1.8 倍）
+const LOVE_HUG_TIP_CURL = 0.25;   // 越外側的羽毛越往內側多轉的角度（弧度）：翼尖向內收攏
+const LOVE_HUG_HANG = 0.8;        // 環抱時羽毛轉向「朝下垂」的程度（0＝維持原本指向，1＝完全垂直向下）
+const LOVE_HUG_HANG_DEG = -92;    // 「朝下垂」的指向角（度）
+const LOVE_HUG_SHORTEN = 0.2;     // 環抱時羽毛縮短比例（太長會戳出身體外面）
+const LOVE_HUG_DROP = 1.0;        // 環抱時翅膀外端往下垂的高度（像手臂環抱在胸前，而不是高舉過頭）
 let loveWingMode = 'normal'; // 'normal' | 'shedding' | 'shed' | 'regrowing'
 let loveWingTweens = [];
 let loveParticles, loveParticleVels = [];
@@ -191,11 +204,11 @@ const SINS_DATA = {
     targetPos: { x: 4.8, y: 2.3, z: -6.5 }
   },
   lust: {
-    title: "慾（Lust / 惑魅雙螺旋）",
-    role: "【費洛蒙傳導體】維繫群落親和力，避免七罪因互斥而解體",
-    morph: "柔韌洋紅雙螺旋絲帶・八瓣律動呼吸花裙・粉霧光場",
-    forage: "散發柔和親和光波，誘引同伴的神經突觸光絲交纏",
-    state: "舒展綻放・費洛蒙光場覆蓋整個中層生態圈",
+    title: "慾（Lust / 纏縛螺旋）",
+    role: "【牽引誘餌】以誘人的脈動光把一切拉近，再隨心跳收緊纏縛；群落靠它彼此牽引、無法分開",
+    morph: "鋸齒緞帶織成的紡錘籠・籠中搏動的暗紅核・底部六片合攏的利刃花瓣・頂端帶光點的誘引絲",
+    forage: "以脈動光誘引靠近之物，心跳時收籠纏縛，吸取牠們的神經突觸光絲",
+    state: "引誘中・核以雙拍搏動，每次心跳籠都收緊一分",
     cameraPos: { x: 0, y: 3.6, z: 15.2 },
     targetPos: { x: 0, y: 2.5, z: 9.5 }
   },
@@ -209,11 +222,11 @@ const SINS_DATA = {
     targetPos: { x: 5.2, y: 1.7, z: 0 }
   },
   sloth: {
-    title: "怠慢（Sloth / 兜帽垂紗者）",
-    role: "【生態基底減震錨】匍匐於群落底層，以垂紗與墨鬚吸收群落過剩震盪維持平衡",
-    morph: "漆黑垂墜兜帽斗篷・赤色雙瞳・紫邊幽光・貼地蔓延的墨色長鬚",
-    forage: "零主動消耗，僅依靠群落沉降的微弱代謝殘渣沿墨鬚滲透維生",
-    state: "深度休眠・代謝率降至 3%，布面只以近乎看不見的幅度起伏",
+    title: "怠慢（Sloth / 滯重沉降者）",
+    role: "【生態基底重力錨】以沉重的質量把群落過剩的動能拖進地底；越靠近它，一切越慢、越沉",
+    morph: "層層堆疊的灰岩軟體・肚腹垂掛的石筍利齒・斷節重臂・岩縫透出的暗紫幽光・環繞下沉的灰燼碎片",
+    forage: "吸收靠近之物的動能與時間：光絲被拖慢、孢子被拽向地面，本體幾乎不耗能",
+    state: "沉降中・重力圈緩慢收縮，每一次呼吸都像地層在錯動",
     cameraPos: { x: 0.6, y: 2.4, z: 8.6 },
     targetPos: { x: -1.6, y: 1.6, z: 3.4 }
   }
@@ -249,6 +262,7 @@ window.addEventListener('DOMContentLoaded', () => {
   buildLoveEnvironment();
   buildShameEnvironment();
   buildSinsEnvironment();
+  setupSceneLighting();
   buildLoveCreature();
   buildShameCreature();
   buildVoidCreature();
@@ -264,6 +278,100 @@ window.addEventListener('DOMContentLoaded', () => {
 // -------------------------------------------------------------
 // 1. 場景配置
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// 光影增強（輕量、不加外部套件）
+//  1. 程序化環境貼圖（PMREM，一次性預算）：只貼在「環境裡偏光滑的材質」上，
+//     讓金屬、車漆、玻璃、積水被光掃到時有微微的反光；生物材質不受影響。
+//  2. 接觸陰影（柔邊暗斑）：房屋、車、街區建築底下的環境遮蔽感，免即時 SSAO。
+//  3. 太陽光陰影 normalBias，去掉陰影斑紋。
+// -------------------------------------------------------------
+function makeEnvTexture(pm, kind) {
+  const es = new THREE.Scene();
+  const stops = kind === 'love'
+    ? [[-1, 0x8da35a], [-0.05, 0xb5cb6f], [0.02, 0xfff1d6], [0.35, 0xcfe6ff], [1, 0x6fa8e8]]
+    : [[-1, 0x0b0f0c], [-0.05, 0x141c17], [0.05, 0x26362b], [0.5, 0x1a2a22], [1, 0x0e1612]];
+  const geo = new THREE.SphereGeometry(50, 32, 16);
+  const pos = geo.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color(), c1 = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i) / 50;
+    let k = 0;
+    while (k < stops.length - 2 && y > stops[k + 1][0]) k++;
+    const t = Math.min(1, Math.max(0, (y - stops[k][0]) / (stops[k + 1][0] - stops[k][0])));
+    c.setHex(stops[k][1]).lerp(c1.setHex(stops[k + 1][1]), t);
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  es.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+  const panel = (hex, s, x, y, z, w, h) => {   // 發光面板＝反光裡的高光來源（亮度 > 1 保留 HDR）
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(hex).multiplyScalar(s), side: THREE.DoubleSide }));
+    m.position.set(x, y, z); m.lookAt(0, 0, 0); es.add(m);
+  };
+  if (kind === 'love') {
+    panel(0xfff3e0, 8, 25, 39, 17, 16, 16);        // 太陽
+    panel(0xdfeeff, 1.5, -30, 20, -20, 30, 12);    // 天空補光
+  } else {
+    panel(0xffb347, 5, -30, 8, -20, 10, 6);        // 琥珀燈
+    panel(0x39d353, 4, 25, 10, -28, 10, 8);        // 化技綠
+    panel(0xb8cdc4, 3, 0, 40, -5, 30, 10);         // 冷月光條
+    panel(0xffb347, 3, 30, 6, 25, 8, 5);
+  }
+  const rt = pm.fromScene(es, 0.015);
+  geo.dispose();
+  return rt.texture;
+}
+
+// 只對「偏光滑」的標準材質套環境反射：越光滑反射越強；粗糙材質不動（避免整體變亮）
+function applyEnvReflections(group, tex, base) {
+  const seen = new Set();
+  group.traverse(o => {
+    if (!o.isMesh) return;
+    const m = o.material;
+    if (!m || Array.isArray(m) || seen.has(m) || !m.isMeshStandardMaterial) return;
+    seen.add(m);
+    if (m.roughness >= 0.9 && m.metalness < 0.2) return;
+    m.envMap = tex;
+    m.envMapIntensity = base * Math.min(1, Math.max(0.1, (0.95 - m.roughness) * 2.2)) + m.metalness * 0.3;
+    m.needsUpdate = true;
+  });
+}
+
+let sinsEnvTex = null;   // 七大罪環境貼圖（環境材質與傲慢玻璃共用）
+let _softRectTex = null;
+function softRectShadowTex() {
+  if (_softRectTex) return _softRectTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.shadowColor = '#000'; g.shadowBlur = 26; g.shadowOffsetX = 1000;
+  g.fillStyle = '#000';
+  g.fillRect(34 - 1000, 34, 60, 60);              // 陰影畫到畫布內，本體被推到畫布外
+  _softRectTex = new THREE.CanvasTexture(c);
+  return _softRectTex;
+}
+// 地面柔邊暗斑（偽環境遮蔽）；放在 parent 的局部座標 (x, z)
+function addContactShadow(parent, x, z, w, d, opacity) {
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, d),
+    new THREE.MeshBasicMaterial({ map: softRectShadowTex(), color: 0x000000, transparent: true, opacity: opacity == null ? 0.5 : opacity,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 })
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, 0.037, z);
+  m.userData.noShadow = true;
+  parent.add(m);
+  return m;
+}
+
+function setupSceneLighting() {
+  const sun = scene.getObjectByName('sunLight');
+  if (sun) { sun.shadow.normalBias = 0.03; sun.shadow.bias = -0.0003; }
+  const pm = new THREE.PMREMGenerator(renderer);
+  if (loveEnvGroup) applyEnvReflections(loveEnvGroup, makeEnvTexture(pm, 'love'), 0.9);
+  sinsEnvTex = makeEnvTexture(pm, 'sins');
+  if (sinsEnvGroup) applyEnvReflections(sinsEnvGroup, sinsEnvTex, 1.0);
+  pm.dispose();
+}
+
 function initScene() {
   const container = document.getElementById('canvas-container');
   clock = new THREE.Clock();
@@ -375,24 +483,68 @@ function buildLoveEnvironment() {
   ground.receiveShadow = true;
   loveEnvGroup.add(ground);
 
-  // 柏油道路：主幹道＋三條垂直岔路＋前後後街（y 逐層墊高，交疊處才不會閃爍）
-  const asphaltMat = new THREE.MeshStandardMaterial({ color: 0x5f6873, roughness: 0.9 });
-  const walkMat = new THREE.MeshStandardMaterial({ color: 0xe8dfca, roughness: 1 });
-  const crackMat = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness: 1 });
+  // ===== 道路（優化版）=====
+  // 柏油噪點貼圖＋雙黃線／邊線／斑馬線（實例化）＋人行道磚縫＋路緣石＋坑洞／補丁／人孔蓋＋縫隙雜草
+  // y 逐層墊高避免閃爍：柏油 .02~.028 < 人行道 .03 < 補丁 .036 < 裂痕 .04~.06 < 標線 .048(+polygonOffset) < 坑洞 .05
+  const rndR = (a, b) => a + Math.random() * (b - a);
+  const mkTex = (draw, size) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    draw(c.getContext('2d'), size);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 4;
+    return t;
+  };
+  const asphaltTex = mkTex((g, s) => {
+    g.fillStyle = '#5f6873'; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 5000; i++) {   // 碎石顆粒
+      g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.10)';
+      g.fillRect(Math.random() * s, Math.random() * s, 1 + Math.random() * 2, 1 + Math.random() * 2);
+    }
+    for (let i = 0; i < 4; i++) {      // 補過的深色斑塊
+      g.fillStyle = 'rgba(30,34,40,0.14)';
+      g.fillRect(Math.random() * s * 0.7, Math.random() * s * 0.7, s * (0.12 + Math.random() * 0.2), s * (0.08 + Math.random() * 0.15));
+    }
+    g.strokeStyle = 'rgba(25,28,34,0.55)'; g.lineWidth = 1.2;   // 細裂縫
+    for (let i = 0; i < 5; i++) {
+      let x = Math.random() * s, y = Math.random() * s;
+      g.beginPath(); g.moveTo(x, y);
+      for (let k = 0; k < 6; k++) { x += (Math.random() - 0.5) * 40; y += (Math.random() - 0.2) * 30; g.lineTo(x, y); }
+      g.stroke();
+    }
+  }, 256);
+  const walkTex = mkTex((g, s) => {
+    g.fillStyle = '#e8dfca'; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 700; i++) {
+      g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.18)' : 'rgba(110,100,80,0.10)';
+      g.fillRect(Math.random() * s, Math.random() * s, 1 + Math.random() * 2, 1 + Math.random() * 2);
+    }
+    g.strokeStyle = 'rgba(120,112,95,0.7)'; g.lineWidth = 4; g.strokeRect(0, 0, s, s);   // 磚縫
+    g.strokeStyle = 'rgba(100,92,78,0.55)'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(s * 0.2, s * 0.1); g.lineTo(s * 0.45, s * 0.5); g.lineTo(s * 0.4, s * 0.9); g.stroke();
+    for (let i = 0; i < 6; i++) {      // 角落青苔
+      g.fillStyle = 'rgba(90,125,60,0.30)';
+      g.beginPath(); g.arc(Math.random() < 0.5 ? 2 : s - 2, Math.random() < 0.5 ? 2 : s - 2, 6 + Math.random() * 12, 0, 7); g.fill();
+    }
+  }, 128);
+
   const roads = [
     { w: 140, d: 9, x: 0, z: 0, y: 0.02 },
     ...LOVE_CROSS_STREETS.map(xs => ({ w: 8, d: 84, x: xs, z: 0, y: 0.024 })),
     ...LOVE_BACK_STREETS.map(zs => ({ w: 140, d: 8, x: 0, z: zs, y: 0.028 })),
   ];
   roads.forEach(r => {
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(r.w, r.d), asphaltMat);
+    const t = asphaltTex.clone(); t.needsUpdate = true; t.repeat.set(r.w / 6, r.d / 6);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(r.w, r.d), new THREE.MeshStandardMaterial({ map: t, roughness: 0.8 }));
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(r.x, r.y, r.z);
     mesh.receiveShadow = true;
     loveEnvGroup.add(mesh);
   });
 
-  // 路面裂痕與破洞（沿每條道路散布）
+  // 路面裂痕（沿每條道路散布）
+  const crackMat = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness: 1 });
   roads.forEach((r, ri) => {
     const horiz = r.w >= r.d;
     const long = horiz ? r.w : r.d;
@@ -412,23 +564,161 @@ function buildLoveEnvironment() {
     }
   });
 
-  // 人行道：主幹道兩側、岔路兩側、後街靠內側
-  const walks = [
-    { w: 140, d: 1.6, x: 0, z: 5.8, y: 0.03 },
-    { w: 140, d: 1.6, x: 0, z: -5.8, y: 0.03 },
-    ...LOVE_CROSS_STREETS.flatMap(xs => [
-      { w: 1.6, d: 84, x: xs - 5.9, z: 0, y: 0.032 },
-      { w: 1.6, d: 84, x: xs + 5.9, z: 0, y: 0.032 },
-    ]),
-    ...LOVE_BACK_STREETS.map(zs => ({ w: 140, d: 1.6, x: 0, z: zs - Math.sign(zs) * 5.9, y: 0.034 })),
-  ];
-  walks.forEach(w => {
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w.w, w.d), walkMat);
+  // 道路標線：用 InstancedMesh（一次畫完），隨機缺段表示磨損
+  const yellowMarks = [], whiteMarks = [];
+  const dashX = (z, x0, x1, len, gap, list, band) => {
+    for (let x = x0; x < x1; x += len + gap) {
+      const cx = x + len / 2;
+      if (LOVE_CROSS_STREETS.some(xs => Math.abs(cx - xs) < band)) continue;
+      if (Math.random() < 0.22) continue;
+      list.push({ x: cx, z, w: len * rndR(0.7, 1), d: 0.14 });
+    }
+  };
+  const dashZ = (x, z0, z1, len, gap, list) => {
+    for (let z = z0; z < z1; z += len + gap) {
+      if (Math.random() < 0.22) continue;
+      list.push({ x, z: z + len / 2, w: 0.14, d: len * rndR(0.7, 1) });
+    }
+  };
+  dashX(0.13, -68, 68, 3.2, 0.3, yellowMarks, 5.2);     // 主幹道雙黃線
+  dashX(-0.13, -68, 68, 3.2, 0.3, yellowMarks, 5.2);
+  dashX(3.9, -68, 68, 5, 0.4, whiteMarks, 5.2);         // 主幹道邊線
+  dashX(-3.9, -68, 68, 5, 0.4, whiteMarks, 5.2);
+  LOVE_CROSS_STREETS.forEach(xs => {
+    [-1, 1].forEach(s => {
+      dashZ(xs, s > 0 ? 6 : -37, s > 0 ? 37 : -6, 3, 2.5, yellowMarks);
+      dashZ(xs - 3.7, s > 0 ? 6 : -37, s > 0 ? 37 : -6, 5, 0.4, whiteMarks);
+      dashZ(xs + 3.7, s > 0 ? 6 : -37, s > 0 ? 37 : -6, 5, 0.4, whiteMarks);
+      for (let z = -3.6; z <= 3.61; z += 0.9) whiteMarks.push({ x: xs + s * 5.9, z, w: 1.8, d: 0.45 });     // 跨主幹道斑馬線
+      for (let x = -3.2; x <= 3.21; x += 0.9) whiteMarks.push({ x: xs + x, z: s * 5.9, w: 0.45, d: 1.8 });   // 跨岔路斑馬線
+    });
+  });
+  LOVE_BACK_STREETS.forEach(zs => {
+    dashX(zs, -68, 68, 3, 2.5, yellowMarks, 5.2);
+    dashX(zs - 3.7, -68, 68, 5, 0.4, whiteMarks, 5.2);
+    dashX(zs + 3.7, -68, 68, 5, 0.4, whiteMarks, 5.2);
+  });
+  const makeMarks = (list, color) => {
+    if (!list.length) return;
+    const im = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshStandardMaterial({ color, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+      list.length
+    );
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+    list.forEach((o, i) => {
+      m.compose(new THREE.Vector3(o.x, 0.048, o.z), q, new THREE.Vector3(o.w, o.d, 1));
+      im.setMatrixAt(i, m);
+    });
+    im.frustumCulled = false;   // r128 的實例化剔除只看原點，會讓標線憑空消失
+    im.receiveShadow = true;
+    loveEnvGroup.add(im);
+  };
+  makeMarks(yellowMarks, 0xd9c36a);
+  makeMarks(whiteMarks, 0xdcdad0);
+
+  // 人行道：貼磚縫貼圖，在路口斷開（改由斑馬線連接）
+  const xRanges = (half) => {
+    const out = []; let start = -70;
+    [...LOVE_CROSS_STREETS].sort((a, b) => a - b).forEach(xs => {
+      if (xs - half > start) out.push([start, xs - half]);
+      start = xs + half;
+    });
+    out.push([start, 70]);
+    return out;
+  };
+  const addWalk = (cx, cz, w, d) => {
+    const t = walkTex.clone(); t.needsUpdate = true; t.repeat.set(w / 1.6, d / 1.6);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: t, roughness: 1 }));
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(w.x, w.y, w.z);
+    mesh.position.set(cx, 0.03, cz);
     mesh.receiveShadow = true;
     loveEnvGroup.add(mesh);
+  };
+  [-5.8, 5.8].forEach(z => xRanges(5.1).forEach(([a, b]) => addWalk((a + b) / 2, z, b - a, 1.6)));
+  LOVE_BACK_STREETS.forEach(zs => [zs - 5.9, zs + 5.9].forEach(z => xRanges(5.1).forEach(([a, b]) => addWalk((a + b) / 2, z, b - a, 1.6))));
+  LOVE_CROSS_STREETS.forEach(xs => [-1, 1].forEach(sx => [-1, 1].forEach(sz => addWalk(xs + sx * 5.9, sz * (6.6 + 35.3) / 2, 1.6, 35.3 - 6.6))));
+
+  // 路緣石
+  const curbMat = new THREE.MeshStandardMaterial({ color: 0xc2bca8, roughness: 1 });
+  const addCurb = (cx, cz, len, horiz) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(horiz ? len : 0.2, 0.14, horiz ? 0.2 : len), curbMat);
+    m.position.set(cx, 0.07, cz);
+    m.receiveShadow = true;
+    loveEnvGroup.add(m);
+  };
+  [-4.7, 4.7].forEach(z => xRanges(4.4).forEach(([a, b]) => addCurb((a + b) / 2, z, b - a, true)));
+  LOVE_BACK_STREETS.forEach(zs => [zs - 4.2, zs + 4.2].forEach(z => xRanges(4.4).forEach(([a, b]) => addCurb((a + b) / 2, z, b - a, true))));
+  LOVE_CROSS_STREETS.forEach(xs => [-1, 1].forEach(sx => [-1, 1].forEach(sz => addCurb(xs + sx * 4.2, sz * (5.0 + 37.6) / 2, 37.6 - 5.0, false))));
+
+  // 柏油補丁、坑洞、人孔蓋
+  const inBand = (x) => LOVE_CROSS_STREETS.some(xs => Math.abs(x - xs) < 5.5);
+  const patchMat = new THREE.MeshStandardMaterial({ color: 0x454c56, roughness: 1, transparent: true, opacity: 0.6 });
+  const potMat = new THREE.MeshStandardMaterial({ color: 0x1f2329, roughness: 1, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0x474c56, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  for (let i = 0; i < 24; i++) {
+    const onMain = i < 14;
+    const x = rndR(-62, 62);
+    const z = onMain ? rndR(-3.4, 3.4) : LOVE_BACK_STREETS[i % 2] + rndR(-3, 3);
+    if (inBand(x) || Math.hypot(x, z) < 4) continue;
+    if (i % 3 === 0) {   // 補丁
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(rndR(1.5, 3.2), rndR(1, 2)), patchMat);
+      p.rotation.set(-Math.PI / 2, 0, rndR(-0.2, 0.2));
+      p.position.set(x, 0.036, z);
+      loveEnvGroup.add(p);
+    } else {             // 坑洞：外圈碎裂＋深色洞
+      const r = rndR(0.3, 0.8), rot = rndR(0, 3);
+      const rim = new THREE.Mesh(new THREE.CircleGeometry(r * 1.35, 10), rimMat);
+      rim.rotation.set(-Math.PI / 2, 0, rot); rim.scale.set(1, 0.75, 1); rim.position.set(x, 0.05, z);
+      const hole = new THREE.Mesh(new THREE.CircleGeometry(r, 10), potMat);
+      hole.rotation.set(-Math.PI / 2, 0, rot); hole.scale.set(1, 0.72, 1); hole.position.set(x, 0.052, z);
+      loveEnvGroup.add(rim, hole);
+    }
+  }
+  const manMat = new THREE.MeshStandardMaterial({ color: 0x4a4e57, roughness: 0.8, metalness: 0.3 });
+  const manLine = new THREE.MeshStandardMaterial({ color: 0x6b707a, roughness: 0.8 });
+  [[-30, 1.9], [-14, -1.9], [18, 1.9], [34, -1.9], [-52, -1.9], [56, 1.9]].forEach(([mx, mz]) => {
+    const cover = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.05, 16), manMat);
+    cover.position.set(mx, 0.045, mz);
+    cover.receiveShadow = true;
+    loveEnvGroup.add(cover);
+    [0, Math.PI / 2].forEach(a => {
+      const ln = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.012, 0.05), manLine);
+      ln.position.set(mx, 0.075, mz); ln.rotation.y = a;
+      loveEnvGroup.add(ln);
+    });
   });
+
+  // 路緣與縫隙鑽出的雜草（實例化）
+  const tuftN = 560;
+  const tuft = new THREE.InstancedMesh(new THREE.ConeGeometry(0.09, 0.45, 5), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), tuftN);
+  tuft.frustumCulled = false;
+  const greens = [0x55783f, 0x6e8f48, 0x86a35d, 0x8d9a4c, 0x4d6b38].map(c => new THREE.Color(c));
+  let tn = 0;
+  const putTuft = (x, z) => {
+    if (tn >= tuftN || Math.hypot(x, z) < 3) return;
+    for (let k = 0; k < 3 && tn < tuftN; k++) {
+      const s = rndR(0.35, 1.0);
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rndR(-0.3, 0.3), rndR(0, 6), rndR(-0.3, 0.3)));
+      const m = new THREE.Matrix4().compose(
+        new THREE.Vector3(x + rndR(-0.12, 0.12), 0.03 + 0.25 * s, z + rndR(-0.12, 0.12)), q, new THREE.Vector3(s, s, s));
+      tuft.setMatrixAt(tn, m);
+      tuft.setColorAt(tn, greens[Math.floor(Math.random() * greens.length)]);
+      tn++;
+    }
+  };
+  for (let i = 0; i < 190; i++) {
+    const kind = i % 5;
+    if (kind === 0) { const x = rndR(-68, 68); if (!inBand(x)) putTuft(x, (Math.random() < 0.5 ? -1 : 1) * rndR(4.45, 4.95)); }
+    else if (kind === 1) { const x = rndR(-68, 68); if (!inBand(x)) putTuft(x, (Math.random() < 0.5 ? -1 : 1) * rndR(5.0, 6.6)); }
+    else if (kind === 2) { const x = rndR(-62, 62); if (!inBand(x)) putTuft(x, rndR(-4.2, 4.2)); }
+    else if (kind === 3) { const xs = LOVE_CROSS_STREETS[i % 3]; putTuft(xs + (Math.random() < 0.5 ? -1 : 1) * rndR(3.9, 4.6), (Math.random() < 0.5 ? -1 : 1) * rndR(6, 36)); }
+    else { const zs = LOVE_BACK_STREETS[i % 2]; const x = rndR(-68, 68); if (!inBand(x)) putTuft(x, zs + (Math.random() < 0.5 ? -1 : 1) * rndR(3.9, 4.6)); }
+  }
+  tuft.count = tn;
+  tuft.instanceMatrix.needsUpdate = true;
+  if (tuft.instanceColor) tuft.instanceColor.needsUpdate = true;
+  loveEnvGroup.add(tuft);
 
   // 房屋群：主幹道兩側各一排，損毀程度隨機
   // 房屋屋身：米色；屋頂每棟不同色（鮮豔晴天美國住宅社區）
@@ -441,32 +731,40 @@ function buildLoveEnvironment() {
     0xb3472a, 0x111c2e, 0x3f6b4f, 0x6e2c3e, 0x121212
   ];
   const pickRoof = () => roofColors[Math.floor(Math.random() * roofColors.length)];
-  for (let side = -1; side <= 1; side += 2) {
-    for (let i = 0; i < 7; i++) {
-      const x = -39 + i * 13 + (Math.random() - 0.5) * 2.0;
-      const z = side * (14 + Math.random() * 1.5);
-      buildRuinedHouse(x, z, side, pickHouse(), null, pickRoof());
-    }
-  }
-
-  // 岔路兩側的房屋（轉向面朝垂直街；z避開主幹道房屋排，岔路側寬度8，房屋中心靠外且足夠分開）
-  LOVE_CROSS_STREETS.forEach((xs, si) => {
-    const zList = xs === 0 ? [-30, -18, 24, 34] : [-28, -17, 18, 30];
-    [-1, 1].forEach(sx => {
-      zList.forEach((zBase, i) => {
-        const hx = xs + sx * 12 + (Math.random() - 0.5) * 1.2;
-        const hz = zBase + (Math.random() - 0.5) * 2;
-        const rotY = (sx > 0 ? -Math.PI / 2 : Math.PI / 2) + (Math.random() - 0.5) * 0.12;
-        buildRuinedHouse(hx, hz, sx, pickHouse(), rotY, pickRoof());
-      });
+  // 歐美獨棟住宅：依序「主幹道 → 後街 → 岔路」貪婪擺放，每棟都檢查不碰路、不重疊
+  // （舊的廢墟房屋函式 buildRuinedHouse 仍保留在檔案中，想還原把下面三段換回呼叫它即可）
+  const housesPlaced = [];
+  const tryRow = (cands, makePose) => {
+    let spec = makeHouseSpec();
+    cands.forEach(c => {
+      const p = makePose(c, spec);
+      if (!placeLoveHouse(p.x, p.z, p.rotY, spec)) return;
+      housesPlaced.push(p);
+      spec = makeHouseSpec();
     });
+  };
+  const range = (a, b, s) => { const r = []; for (let v = a; v <= b; v += s) r.push(v); return r; };
+
+  // 主幹道兩側（面朝馬路）
+  [-1, 1].forEach(side => {
+    tryRow(range(-52, 52, 1), (x) => ({
+      x, z: side * (14.5 + Math.random() * 0.8), rotY: side > 0 ? Math.PI : 0
+    }));
   });
 
-  // 後街外側的房屋（面朝後街：離地塊較遠且不落在路面上）
-  LOVE_BACK_STREETS.forEach((zs, si) => {
-    [-34, -17, 0, 17, 34].forEach((hx, i) => {
-      const hz = zs + Math.sign(zs) * 11;
-      buildRuinedHouse(hx + (Math.random() - 0.5) * 2, hz, zs > 0 ? 1 : -1, pickHouse(), null, pickRoof());
+  // 後街外側（面朝後街）
+  LOVE_BACK_STREETS.forEach(zs => {
+    tryRow(range(-52, 52, 1), (x) => ({
+      x, z: zs + Math.sign(zs) * 13, rotY: zs > 0 ? Math.PI : 0
+    }));
+  });
+
+  // 岔路兩側（轉 90° 面朝岔路）
+  LOVE_CROSS_STREETS.forEach(xs => {
+    [-1, 1].forEach(sx => {
+      tryRow(range(-38, 38, 1), (zc) => ({
+        x: xs + sx * (13.4 + Math.random() * 0.4), z: zc, rotY: sx > 0 ? -Math.PI / 2 : Math.PI / 2
+      }));
     });
   });
 
@@ -509,9 +807,9 @@ function buildLoveEnvironment() {
     if (ok) buildOvergrownTree(x, z);
   }
 
-  // 廢棄車輛殘骸（兩輛），車身用鮮明色彩
-  buildRustedCar(8, 2.2, 0.35, 0xe84f34);
-  buildRustedCar(-22, -2.8, -1.1, 0x2e9df0);
+  // 廢棄車輛（側視輪廓建模，十輛四種車型）與街道小物件（路標、消防栓、路燈…）
+  buildLoveCars();
+  buildLoveStreetProps();
 
   // 草叢與雜草簇（避開房屋佔地，讓草照樣長進路面縫裡）
   const weedMat = new THREE.MeshStandardMaterial({ color: 0x55783f, roughness: 1 });
@@ -530,7 +828,481 @@ function buildLoveEnvironment() {
   buildLoveRelics();
 }
 
-// 單棟廢墟房屋：牆體＋塌陷屋頂＋破窗＋藤蔓＋瓦礫
+// =============================================================
+// 歐美郊區獨棟住宅（參考美國典型 suburban house：雙坡屋頂 6/12 坡度、
+// 橫向壁板外牆、前門廊、附車庫、磚砌煙囪、百葉窗）
+// 尺寸以公尺計；局部座標 +z 為正面，原點在主屋中心
+// =============================================================
+const HOUSE_SIDING = [0xf3ecd9, 0xe9e5dc, 0xd3dde6, 0xdce6d2, 0xf1e0b9, 0xe8d2c6, 0xc3d2db, 0xeadac3, 0xcfc9bc, 0xe6e2c8];
+const HOUSE_ROOF = [0x4a4a4e, 0x5a4a42, 0x3d3f45, 0x6a5a50, 0x2f3640, 0x58504b];
+const HOUSE_DOOR = [0x8b2f1f, 0x1f3a5f, 0x2f5d44, 0x2a2a2e, 0xb8862b, 0x5a2d3e];
+const HOUSE_SHUTTER = ['#2f4a63', '#3d5a45', '#6b2a2a', '#2a2a2e'];
+const _houseCache = { mat: {}, tex: {} };
+
+function houseMat(color, rough, key) {
+  const k = key || (color + '_' + rough);
+  if (!_houseCache.mat[k]) _houseCache.mat[k] = new THREE.MeshStandardMaterial({ color, roughness: rough == null ? 0.9 : rough });
+  return _houseCache.mat[k];
+}
+
+// 橫向壁板貼圖（每 0.2 m 一條板縫），依牆高決定垂直重複次數
+function houseSidingMat(color, wallH) {
+  const key = 'sid_' + color + '_' + wallH;
+  if (_houseCache.mat[key]) return _houseCache.mat[key];
+  const tkey = 'sid_' + wallH;
+  if (!_houseCache.tex[tkey]) {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const g = c.getContext('2d');
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, 64, 64);
+    for (let i = 0; i < 4; i++) {
+      g.fillStyle = '#c9c4b8'; g.fillRect(0, i * 16, 64, 2);
+      g.fillStyle = '#ece8de'; g.fillRect(0, i * 16 + 2, 64, 1);
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(1, wallH / 0.8);
+    _houseCache.tex[tkey] = t;
+  }
+  const m = new THREE.MeshStandardMaterial({ color, roughness: 0.92, map: _houseCache.tex[tkey] });
+  _houseCache.mat[key] = m;
+  return m;
+}
+
+// 窗戶貼圖：白色窗框＋玻璃＋格條；shutter 有顏色時兩側加百葉窗
+// state：'ok' 完好／'broken' 玻璃碎裂、框發黃／'gone' 玻璃全無、黑洞洞
+function houseWindowMat(shutter, state) {
+  state = state || 'ok';
+  const key = 'win_' + (shutter || 'none') + '_' + state + '_' + (state === 'broken' ? Math.floor(Math.random() * 4) : 0);
+  if (_houseCache.mat[key]) return _houseCache.mat[key];
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const g = c.getContext('2d');
+  const x0 = shutter ? 0.18 : 0.02, x1 = shutter ? 0.82 : 0.98;
+  const ruined = state !== 'ok';
+  if (shutter) {
+    g.fillStyle = ruined ? '#4d4a40' : shutter;
+    g.fillRect(2, 4, 128 * 0.15, 120);
+    if (!ruined || state === 'broken') g.fillRect(128 * 0.85 - 2, 4, 128 * 0.15, 120); // 損毀時右百葉窗常掉落
+    g.fillStyle = 'rgba(0,0,0,0.25)';
+    for (let y = 10; y < 120; y += 8) {
+      g.fillRect(4, y, 128 * 0.15 - 4, 1.5);
+      if (!ruined || state === 'broken') g.fillRect(128 * 0.85, y, 128 * 0.15 - 4, 1.5);
+    }
+  }
+  const fx = 128 * x0, fw = 128 * (x1 - x0);
+  g.fillStyle = ruined ? '#b9b39c' : '#fbf9f2'; g.fillRect(fx, 4, fw, 120);   // 窗框（損毀＝發黃）
+  const gr = g.createLinearGradient(0, 12, 0, 116);
+  if (state === 'gone') { gr.addColorStop(0, '#1b1916'); gr.addColorStop(1, '#0b0a09'); }
+  else if (state === 'broken') { gr.addColorStop(0, '#46565f'); gr.addColorStop(1, '#1d262b'); }
+  else { gr.addColorStop(0, '#b4cbdb'); gr.addColorStop(1, '#5f7f97'); }
+  g.fillStyle = gr; g.fillRect(fx + 6, 12, fw - 12, 104);       // 玻璃
+  if (state !== 'gone') {
+    g.fillStyle = ruined ? '#b9b39c' : '#fbf9f2';
+    g.fillRect(fx + fw / 2 - 1.5, 12, 3, 104);                  // 直格條
+    g.fillRect(fx + 6, 12 + 104 / 3 - 1.5, fw - 12, 3);         // 橫格條
+    g.fillRect(fx + 6, 12 + 208 / 3 - 1.5, fw - 12, 3);
+  }
+  if (state === 'broken') {
+    g.strokeStyle = 'rgba(235,240,245,0.85)'; g.lineWidth = 1.5;   // 蛛網裂痕
+    const cx = fx + fw * (0.3 + Math.random() * 0.4), cy = 30 + Math.random() * 50;
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2 + Math.random() * 0.4, L = 25 + Math.random() * 40;
+      g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * L, cy + Math.sin(a) * L); g.stroke();
+    }
+    g.fillStyle = '#0b0a09';                                       // 缺角黑洞
+    g.beginPath(); g.moveTo(cx - 14, cy - 10); g.lineTo(cx + 18, cy - 16); g.lineTo(cx + 8, cy + 20); g.lineTo(cx - 16, cy + 12); g.fill();
+  }
+  g.fillStyle = ruined ? '#9a947f' : '#e4dfd2'; g.fillRect(fx - 3, 120, fw + 6, 6);  // 窗台
+  const t = new THREE.CanvasTexture(c);
+  const m = new THREE.MeshStandardMaterial({ map: t, roughness: 0.22, metalness: 0.1, alphaTest: 0.5 });
+  _houseCache.mat[key] = m;
+  return m;
+}
+
+function houseGarageDoorMat() {
+  if (_houseCache.mat.garage) return _houseCache.mat.garage;
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 96;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f2efe6'; g.fillRect(0, 0, 128, 96);
+  g.strokeStyle = '#bdb8aa'; g.lineWidth = 2;
+  for (let r = 0; r < 4; r++) {
+    for (let col = 0; col < 4; col++) g.strokeRect(4 + col * 31, 4 + r * 23, 29, 21);
+  }
+  g.fillStyle = '#7a95a8';
+  for (let col = 0; col < 4; col++) g.fillRect(8 + col * 31, 8, 21, 9); // 上排小窗
+  const m = new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(c), roughness: 0.7 });
+  _houseCache.mat.garage = m;
+  return m;
+}
+
+// 雙坡屋頂（脊線沿局部 x），run＝半進深，坡度 6/12
+function addHouseGable(parent, cx, baseY, cz, len, run, wallMat, roofMat, rotY, ruin) {
+  ruin = ruin || 0;
+  const g = new THREE.Group();
+  g.position.set(cx, baseY, cz);
+  g.rotation.y = rotY || 0;
+  const rise = run * 0.5, ov = 0.5, R = run + ov;
+  const Ls = Math.hypot(R, R * 0.5), a = Math.atan(0.5);
+  const rafterMat = houseMat(0x4a3a2c, 1);
+  [-1, 1].forEach(s => {
+    // 廢墟：整片屋面塌掉只剩椽木；或屋面下垂、歪斜、掉落一角
+    if (ruin > 0.35 && Math.random() < ruin * 0.5) {
+      for (let i = 0; i < 5; i++) {
+        const rf = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, Ls * (0.55 + Math.random() * 0.45)), rafterMat);
+        rf.position.set(-len / 2 + (i + 0.5) * len / 5, rise - R / 4 + 0.05 - Math.random() * 0.3, s * R / 2 * (0.7 + Math.random() * 0.25));
+        rf.rotation.x = s * a + (Math.random() - 0.5) * 0.5 * ruin;
+        rf.rotation.z = (Math.random() - 0.5) * 0.3;
+        g.add(rf);
+      }
+      return;
+    }
+    const lenS = ruin > 0.3 ? (len + 0.5) * (0.6 + Math.random() * 0.4) : len + 0.5;   // 屋面缺一段
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(lenS, 0.14, Ls), roofMat);
+    slab.position.set(ruin > 0.3 ? (Math.random() - 0.5) * (len + 0.5 - lenS) : 0, rise - R / 4 + 0.07, s * R / 2);
+    slab.rotation.x = s * a;
+    if (ruin > 0.2) {
+      slab.rotation.x += s * (Math.random() - 0.3) * ruin * 0.45;
+      slab.rotation.z = (Math.random() - 0.5) * ruin * 0.35;
+      slab.position.y -= Math.random() * ruin * 0.7;
+    }
+    g.add(slab);
+  });
+  const ridge = new THREE.Mesh(new THREE.BoxGeometry(len + 0.5, 0.12, 0.22), roofMat);
+  ridge.position.set(0, rise + 0.12, 0);
+  if (ruin < 0.5 || Math.random() < 0.35) g.add(ridge);
+  const shape = new THREE.Shape();
+  shape.moveTo(-run, 0); shape.lineTo(run, 0); shape.lineTo(0, rise);
+  [-1, 1].forEach(s => {
+    if (ruin > 0.7 && Math.random() < 0.3) return;   // 山牆整片倒塌
+    const tri = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.25, bevelEnabled: false }), wallMat);
+    tri.rotation.y = Math.PI / 2;
+    tri.position.set(s > 0 ? len / 2 - 0.25 : -len / 2, 0, 0);
+    g.add(tri);
+  });
+  parent.add(g);
+  return g;
+}
+
+function makeHouseSpec() {
+  const floors = Math.random() < 0.55 ? 2 : 1;
+  const garage = Math.random() < 0.7 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+  const w = 6.3 + Math.random() * 1.1;
+  const d = 5.9 + Math.random() * 0.8;
+  const gw = garage ? 3.4 : 0;
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  return {
+    floors, garage, w, d, gw,
+    siding: pick(HOUSE_SIDING), roof: pick(HOUSE_ROOF), door: pick(HOUSE_DOOR),
+    shutter: Math.random() < 0.5 ? pick(HOUSE_SHUTTER) : null,
+    frontGable: Math.random() < 0.55,
+    doorSide: Math.random() < 0.5 ? -1 : 1,
+    chimneySide: Math.random() < 0.5 ? -1 : 1,
+    ruin: 0.4 + Math.random() * 0.6   // 0.4 輕度風化 ~ 1.0 幾乎垮掉（刻意誇張）
+  };
+}
+
+// 嘗試放置；佔地矩形與路面或已放置的房屋重疊就回傳 false（會往下一個候選位置移動）
+function placeLoveHouse(x, z, rotY, spec) {
+  const halfW = (spec.w + spec.gw) / 2 + 0.4;
+  const halfD = spec.d / 2 + 0.85;          // 前門廊延伸 1.6、後牆 0.1，取中心前移 0.75
+  const cx = x + Math.sin(rotY) * 0.75, cz = z + Math.cos(rotY) * 0.75;
+  const rotated = Math.abs(Math.sin(rotY)) > 0.7;
+  const hw = rotated ? halfD : halfW, hd = rotated ? halfW : halfD;
+  // 路面（含人行道）
+  if (Math.abs(cz) < 7.4 + hd) return false;
+  for (const zs of LOVE_BACK_STREETS) if (Math.abs(cz - zs) < 7.4 + hd) return false;
+  for (const xs of LOVE_CROSS_STREETS) if (Math.abs(cx - xs) < 7.4 + hw) return false;
+  // 與既有房屋至少留 2.2m 側院
+  for (const o of loveObstacles) {
+    if (Math.abs(cx - o.x) < hw + o.hw + 3.2 && Math.abs(cz - o.z) < hd + o.hd + 3.2) return false;
+  }
+  loveObstacles.push({ x: cx, z: cz, hw, hd });
+  buildHouse(x, z, rotY, spec);
+  return true;
+}
+
+function buildHouse(x, z, rotY, spec) {
+  const grp = new THREE.Group();
+  grp.position.set(x, 0, z);
+  grp.rotation.y = rotY;
+  const { w, d, floors, garage, gw } = spec;
+  const total = w + gw;
+  const bx = -garage * (total / 2 - w / 2);   // 主屋中心 x
+  const gx = garage * (total / 2 - gw / 2);   // 車庫中心 x
+  const FH = 0.45;                            // 基座高
+  const H = floors === 2 ? 5.4 : 2.9;
+  const ruin = spec.ruin || 0;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  // 風化：把顏色往灰褐／苔綠偏移，越毀越暗
+  const weather = (hex, toHex, k) => '#' + new THREE.Color(hex).lerp(new THREE.Color(toHex), k).getHexString();
+  const wc = (hex, toHex, k) => new THREE.Color(weather(hex, toHex, k)).getHex();
+  const trim = houseMat(wc(0xfaf7f0, 0x9d977f, ruin * 0.8), 0.95);
+  const concrete = houseMat(wc(0xb9b5ac, 0x6f6b5f, ruin * 0.7), 1);
+  const roofMat = houseMat(wc(spec.roof, 0x4e5a3a, ruin * 0.35), 1);
+  const wallCol = wc(wc(spec.siding, 0x8c8573, ruin * 0.6), 0x4f5a3f, ruin * 0.15);
+  const wallMat = houseSidingMat(wallCol, H);
+  const mossMat = houseMat(0x5b7d3f, 1);
+  const darkMat = houseMat(0x14110e, 1);
+  const vineMat = houseMat(0x4d7338, 1);
+  const vineDark = houseMat(0x2f5230, 1);
+  // 整棟微傾斜（地基下陷）
+  if (ruin > 0.5) { grp.rotation.z = rnd(-1, 1) * ruin * 0.05; grp.rotation.x = rnd(-1, 1) * ruin * 0.03; }
+  const ds = garage !== 0 ? garage : spec.doorSide;   // 大門靠車庫那側
+  const doorX = bx + ds * (w / 2 - 1.5);
+
+  const box = (bw, bh, bd, mat, px, py, pz) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), mat);
+    m.position.set(px, py, pz);
+    grp.add(m);
+    return m;
+  };
+  const plane = (pw, ph, mat, px, py, pz, ry) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), mat);
+    m.position.set(px, py, pz);
+    m.rotation.y = ry || 0;
+    m.userData.noShadow = true;
+    grp.add(m);
+    return m;
+  };
+  const win = (px, py, pz, ry, shutter) => {
+    const ww = shutter ? 1.9 : 1.3;
+    const r = Math.random();
+    const state = r < ruin * 0.4 ? 'gone' : (r < ruin * 0.95 ? 'broken' : 'ok');
+    return plane(ww, 1.6, houseWindowMat(shutter, state), px, py, pz, ry);
+  };
+  // 裝飾小物（藤蔓、雜草、瓦礫）：不投影以省效能
+  const deco = (geo, mat, px, py, pz, sc, shadow) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(px, py, pz);
+    if (sc) m.scale.set(sc[0], sc[1], sc[2]);
+    m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    if (!shadow) m.userData.noShadow = true;
+    grp.add(m);
+    return m;
+  };
+
+  // 主屋：基座＋牆身＋二樓腰線＋屋頂
+  box(w + 0.12, FH, d + 0.12, concrete, bx, FH / 2, 0);
+  box(w, H, d, wallMat, bx, FH + H / 2, 0);
+  if (floors === 2) box(w + 0.1, 0.14, d + 0.1, trim, bx, FH + 2.95, 0);
+  // 牆根苔蘚帶與雨水汙痕
+  if (ruin > 0.2) {
+    const mb = box(w + 0.04, 0.9 + ruin * 0.8, d + 0.04, mossMat, bx, FH + (0.9 + ruin * 0.8) / 2, 0);
+    mb.material = mossMat.clone(); mb.material.transparent = true; mb.material.opacity = 0.55;
+    mb.userData.noShadow = true;
+    for (let i = 0; i < 3 + ruin * 6; i++) {
+      const sh = rnd(1.0, 2.6), sxp = bx + rnd(-w / 2 + 0.3, w / 2 - 0.3);
+      const stain = box(rnd(0.15, 0.4), sh, 0.01, houseMat(0x3d3a30, 1), sxp, FH + H - sh / 2 - 0.1, d / 2 + 0.035);
+      stain.material = stain.material.clone(); stain.material.transparent = true; stain.material.opacity = 0.35;
+      stain.userData.noShadow = true;
+    }
+  }
+  addHouseGable(grp, bx, FH + H, 0, w, d / 2, wallMat, roofMat, 0, ruin);
+
+  // 牆面大洞（露出黑暗室內）與缺角：前牆、側牆各抽幾個
+  const holeMat = darkMat;
+  const makeHole = (px, py, pz, ry, size) => {
+    const pts = [], n = 8;
+    for (let i = 0; i < n; i++) {
+      const ang = (i / n) * Math.PI * 2, rr = size * (0.55 + Math.random() * 0.5);
+      pts.push(new THREE.Vector2(Math.cos(ang) * rr * 1.1, Math.sin(ang) * rr * 0.9));
+    }
+    const hm = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(pts)), holeMat);
+    hm.position.set(px, py, pz); hm.rotation.y = ry; hm.userData.noShadow = true;
+    grp.add(hm);
+  };
+  if (ruin > 0.45) {
+    const nHoles = Math.floor(ruin * 3);
+    for (let i = 0; i < nHoles; i++) {
+      makeHole(bx + rnd(-w / 2 + 1.2, w / 2 - 1.2), FH + rnd(1.0, H - 0.8), d / 2 + 0.09 + i * 0.004, 0, rnd(0.5, 1.1));
+    }
+    makeHole(bx + (garage !== 0 ? -garage : spec.chimneySide) * (w / 2 + 0.09), FH + rnd(0.9, H - 0.9), rnd(-1, 1) * (d / 2 - 1.2),
+      (garage !== 0 ? -garage : spec.chimneySide) > 0 ? Math.PI / 2 : -Math.PI / 2, rnd(0.6, 1.2));
+  }
+  // 二樓頂部缺口：牆頂鋸齒狀斷裂
+  if (floors === 2 && ruin > 0.6) {
+    for (let i = 0; i < 4; i++) {
+      box(rnd(0.6, 1.4), rnd(0.4, 1.1), 0.25, houseMat(0x2b2722, 1), bx + rnd(-w / 2 + 0.7, w / 2 - 0.7), FH + H + rnd(0.1, 0.4), d / 2 - 0.05);
+    }
+  }
+
+  // 前面窗戶（一樓兩扇在大門另一側；二樓三扇）
+  const sh = spec.shutter;
+  const frontZ = d / 2 + 0.06;
+  win(bx - ds * 2.1, FH + 1.55, frontZ, 0, sh);
+  win(bx - ds * 0.0, FH + 1.55, frontZ, 0, sh);
+  if (floors === 2) [-2.1, 0, 2.1].forEach(ox => win(bx + ox, FH + 4.2, frontZ, 0, sh));
+
+  // 側面（非車庫側）與背面窗戶
+  const ws = garage !== 0 ? -garage : -spec.chimneySide;   // 有窗戶的那一側
+  const sideX = bx + ws * (w / 2 + 0.06);
+  const sideRy = ws > 0 ? Math.PI / 2 : -Math.PI / 2;
+  [-1.9, 1.9].forEach(oz => {
+    win(sideX, FH + 1.55, oz, sideRy, null);
+    if (floors === 2) win(sideX, FH + 4.2, oz, sideRy, null);
+  });
+  [-2.0, 0, 2.0].forEach(ox => {
+    win(bx + ox, FH + 1.55, -d / 2 - 0.06, Math.PI, null);
+    if (floors === 2) win(bx + ox, FH + 4.2, -d / 2 - 0.06, Math.PI, null);
+  });
+
+  // 前門（門框＋門板＋門把）、門廊平台、台階、兩根柱子與小屋簷、步道
+  box(1.25, 2.25, 0.1, trim, doorX, FH + 1.125, d / 2 + 0.05);
+  const doorCol = wc(spec.door, 0x5a4a3a, ruin * 0.5);
+  if (ruin > 0.4 && Math.random() < 0.7) {
+    // 大門洞開：黑暗門洞＋歪掛在一邊鉸鏈的門板
+    box(1.0, 2.1, 0.05, darkMat, doorX, FH + 1.05, d / 2 + 0.09);
+    const hinge = new THREE.Group();
+    hinge.position.set(doorX - 0.5, FH + 1.05, d / 2 + 0.12);
+    hinge.rotation.y = -rnd(0.8, 1.5);
+    hinge.rotation.z = rnd(-0.08, 0.08);
+    const dm = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.1, 0.06), houseMat(doorCol, 0.8));
+    dm.position.set(0.5, 0, 0); dm.castShadow = true;
+    hinge.add(dm);
+    grp.add(hinge);
+  } else {
+    box(1.0, 2.1, 0.06, houseMat(doorCol, 0.8), doorX, FH + 1.05, d / 2 + 0.1);
+    box(0.09, 0.09, 0.07, houseMat(0xd4af37, 0.3), doorX + 0.36, FH + 1.0, d / 2 + 0.16);
+  }
+  const stepMat = ruin > 0.5 ? mossMat : concrete;
+  box(2.8, FH + 0.03, 1.6, concrete, doorX, (FH + 0.03) / 2, d / 2 + 0.8);
+  box(1.6, 0.22, 0.5, stepMat, doorX, 0.11, d / 2 + 1.85).rotation.y = rnd(-0.1, 0.1) * ruin;
+  const porchRoof = box(3.2, 0.14, 2.0, roofMat, doorX, FH + 2.65, d / 2 + 0.95);
+  porchRoof.rotation.x = 0.14;
+  if (ruin > 0.5) {   // 門廊小屋簷塌下一角
+    porchRoof.rotation.x = 0.14 + ruin * 0.5;
+    porchRoof.rotation.z = rnd(-1, 1) * ruin * 0.25;
+    porchRoof.position.y -= ruin * 0.35;
+  }
+  [-1.25, 1.25].forEach(ox => {
+    const broken = ruin > 0.5 && Math.random() < ruin * 0.6;
+    const col = box(0.14, broken ? 1.3 : 2.2, 0.14, trim, doorX + ox, FH + (broken ? 0.65 : 1.1), d / 2 + 1.5);
+    if (broken) col.rotation.z = rnd(-0.5, 0.5);
+  });
+  // 步道：龜裂長草
+  box(1.1, 0.05, 2.0, ruin > 0.5 ? houseMat(0x8a877c, 1) : concrete, doorX, 0.025, d / 2 + 3.1);
+  for (let i = 0; i < 4 + ruin * 6; i++) {
+    deco(new THREE.IcosahedronGeometry(rnd(0.12, 0.25), 0), i % 2 ? vineMat : vineDark,
+      doorX + rnd(-0.6, 0.6), 0.1, d / 2 + rnd(1.9, 4.0), [1, rnd(0.6, 1.6), 1]);
+  }
+
+  // 車庫：略退縮、矮一點的屋頂、分格車庫門、車道
+  if (garage !== 0) {
+    const GH = 2.7, gd = d - 0.6, gz = -0.3, gFront = gz + gd / 2;
+    box(gw + 0.1, FH - 0.03, gd + 0.1, concrete, gx, (FH - 0.03) / 2, gz);
+    const gWall = houseSidingMat(wallCol, GH);
+    box(gw, GH, gd, gWall, gx, FH + GH / 2, gz);
+    addHouseGable(grp, gx, FH + GH, gz, gw, gd / 2, gWall, roofMat, 0, ruin);
+    if (ruin > 0.55) {
+      // 車庫門鏽蝕塌下：黑洞洞門口＋只剩下半截歪斜的門板
+      plane(gw - 0.6, 2.1, darkMat, gx, FH + 1.05, gFront + 0.02, 0);
+      const gdp = plane(gw - 0.6, 1.1, houseGarageDoorMat(), gx, FH + 0.55, gFront + 0.05, 0);
+      gdp.material = gdp.material.clone(); gdp.material.color.set(0x8f8a7c);
+      gdp.rotation.x = -rnd(0.1, 0.35); gdp.rotation.z = rnd(-0.08, 0.08);
+    } else {
+      const gdp = plane(gw - 0.6, 2.1, houseGarageDoorMat(), gx, FH + 1.05, gFront + 0.03, 0);
+      if (ruin > 0.3) { gdp.material = gdp.material.clone(); gdp.material.color.set(0xa39e8f); }
+    }
+    box(gw - 0.5, 0.06, 3.6, ruin > 0.4 ? houseMat(0x8a877c, 1) : concrete, gx, 0.03, gFront + 1.8);
+    for (let i = 0; i < 3 + ruin * 8; i++) {   // 車道裂縫長草
+      deco(new THREE.IcosahedronGeometry(rnd(0.12, 0.28), 0), i % 2 ? vineMat : vineDark,
+        gx + rnd(-gw / 2 + 0.4, gw / 2 - 0.4), 0.1, gFront + rnd(0.3, 3.4), [1, rnd(0.6, 1.8), 1]);
+    }
+  }
+
+  // 前山牆（過半數房屋有，增加層次）與閣樓小窗
+  if (spec.frontGable && floors === 2) {
+    const gl = 2.6;
+    addHouseGable(grp, doorX, FH + H, d / 2 + 0.25 - gl / 2, gl, 1.5, wallMat, roofMat, Math.PI / 2, ruin);
+    win(doorX, FH + H + 0.5, d / 2 + 0.27, 0, null).scale.set(0.5, 0.45, 1);
+  }
+
+  // 磚砌煙囪（與側面窗戶同一側外牆，窗在 z=±1.9、煙囪在 z=0）
+  const cs = ws;
+  const chFull = FH + H + d * 0.25 + 0.9;
+  const chH = ruin > 0.55 ? chFull * rnd(0.7, 0.9) : chFull;   // 煙囪頂端崩斷
+  const brick = houseMat(wc(0x9c5440, 0x5a4a3c, ruin * 0.5), 1);
+  const chim = box(0.8, chH, 1.0, brick, bx + cs * (w / 2 + 0.3), chH / 2, 0);
+  if (ruin > 0.55) chim.rotation.z = rnd(-1, 1) * 0.07;
+  else box(1.0, 0.12, 1.2, houseMat(0x6e6a64, 1), bx + cs * (w / 2 + 0.3), chH + 0.06, 0);
+  if (ruin > 0.55) {   // 掉落的磚塊散在煙囪腳邊
+    for (let i = 0; i < 8; i++) {
+      const bk = box(0.3, 0.14, 0.15, brick, bx + cs * (w / 2 + rnd(0.4, 1.8)), 0.08, rnd(-1.6, 1.6));
+      bk.rotation.set(rnd(-0.4, 0.4), rnd(0, 3), rnd(-0.4, 0.4));
+    }
+  }
+
+  // ---- 自然侵蝕：藤蔓、爬牆植物、屋頂苔蘚、灌木、雜草、瓦礫 ----
+  const sideDir = ws, sideWx = bx + sideDir * (w / 2 + 0.08);
+  // 藤蔓團塊貼在牆上（正面、側面、背面），越毀越多
+  const nVine = Math.floor(8 + ruin * 26);
+  for (let i = 0; i < nVine; i++) {
+    const face = Math.floor(Math.random() * 3);
+    const gy = FH + rnd(0.2, H);
+    const geo = new THREE.IcosahedronGeometry(rnd(0.22, 0.5), 0);
+    const sc = [rnd(0.8, 1.6), rnd(0.8, 2.2), 0.45];
+    const mat = Math.random() < 0.5 ? vineMat : vineDark;
+    if (face === 0) deco(geo, mat, bx + rnd(-w / 2, w / 2), gy, d / 2 + 0.12, sc);
+    else if (face === 1) deco(geo, mat, sideWx, gy, rnd(-d / 2, d / 2), [0.45, sc[1], sc[0]]);
+    else deco(geo, mat, bx + rnd(-w / 2, w / 2), gy, -d / 2 - 0.12, sc);
+  }
+  // 垂掛的藤蔓條
+  for (let i = 0; i < 2 + ruin * 8; i++) {
+    const vl = rnd(1.2, 3.2);
+    box(rnd(0.08, 0.2), vl, 0.05, vineDark, bx + rnd(-w / 2, w / 2), FH + H - vl / 2 + 0.1, d / 2 + 0.07).userData.noShadow = true;
+  }
+  // 屋頂上的苔蘚與雜草叢（壓扁的綠球）
+  for (let i = 0; i < 2 + ruin * 7; i++) {
+    const rz = rnd(-d / 2 * 0.9, d / 2 * 0.9);
+    deco(new THREE.IcosahedronGeometry(rnd(0.3, 0.7), 0), Math.random() < 0.6 ? mossMat : vineMat,
+      bx + rnd(-w / 2, w / 2), FH + H + d * 0.25 - Math.abs(rz) * 0.5 + 0.08, rz, [1.3, 0.35, 1.3]);
+  }
+  // 灌木與雜草：包住牆腳與前院
+  const nBush = Math.floor(3 + ruin * 7);
+  for (let i = 0; i < nBush; i++) {
+    const bxp = bx + rnd(-total / 2 - 0.3, total / 2 + 0.3);
+    const bzp = Math.random() < 0.55 ? d / 2 + rnd(0.2, 2.4) : (Math.random() < 0.5 ? -d / 2 - rnd(0.2, 1.2) : rnd(-d / 2, d / 2));
+    const bxx = bzp > -d / 2 && bzp < d / 2 ? bx + (Math.random() < 0.5 ? -1 : 1) * (total / 2 + rnd(0.3, 0.8)) : bxp;
+    deco(new THREE.IcosahedronGeometry(rnd(0.5, 1.1), 1), Math.random() < 0.5 ? vineMat : vineDark, bxx, 0.45, bzp, [1, rnd(0.6, 1.1), 1], true);
+  }
+  for (let i = 0; i < 10 + ruin * 22; i++) {   // 雜草叢
+    deco(new THREE.ConeGeometry(rnd(0.05, 0.1), rnd(0.4, 1.0), 4), Math.random() < 0.5 ? vineMat : houseMat(0x8a8a4a, 1),
+      bx + rnd(-total / 2 - 0.8, total / 2 + 0.8), 0.3, rnd(-d / 2 - 1.5, d / 2 + 3.5), [1, 1, 1]).rotation.set(rnd(-0.4, 0.4), 0, rnd(-0.4, 0.4));
+  }
+  // 瓦礫：碎磚、斷板、掉落的瓦片
+  const rubbleMat = houseMat(0x8f8777, 1);
+  for (let i = 0; i < 4 + ruin * 14; i++) {
+    const r = deco(new THREE.DodecahedronGeometry(rnd(0.15, 0.45), 0), Math.random() < 0.4 ? brick : rubbleMat,
+      bx + rnd(-total / 2 - 0.8, total / 2 + 0.8), 0.15, rnd(-d / 2 - 1.5, d / 2 + 2.5), [1, rnd(0.5, 0.9), 1], true);
+  }
+  for (let i = 0; i < 3 + ruin * 6; i++) {   // 掉落的壁板與屋瓦
+    const sl = box(rnd(0.6, 1.8), 0.05, rnd(0.2, 0.5), Math.random() < 0.5 ? wallMat : roofMat,
+      bx + rnd(-total / 2 - 0.6, total / 2 + 0.6), 0.08, rnd(d / 2 - 0.5, d / 2 + 2.5));
+    sl.rotation.set(rnd(-0.3, 0.3), rnd(0, 3), rnd(-0.3, 0.3)); sl.userData.noShadow = true;
+  }
+  // 誇張：屋頂破洞長出一棵小樹
+  if (ruin > 0.65 && Math.random() < 0.5) {
+    const th = FH + H + d * 0.25 + rnd(1.0, 2.2);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.2, th, 6), houseMat(0x6b5a46, 1));
+    trunk.position.set(bx + rnd(-w * 0.25, w * 0.25), th / 2, rnd(-0.8, 0.8));
+    trunk.rotation.z = rnd(-0.12, 0.12);
+    grp.add(trunk);
+    for (let i = 0; i < 3; i++) {
+      const lf = new THREE.Mesh(new THREE.IcosahedronGeometry(rnd(0.8, 1.2), 1), i % 2 ? vineMat : mossMat);
+      lf.position.set(trunk.position.x + rnd(-0.6, 0.6), th + rnd(-0.2, 0.7), trunk.position.z + rnd(-0.6, 0.6));
+      lf.castShadow = true;
+      grp.add(lf);
+    }
+  }
+
+  addContactShadow(grp, 0, 0.1, total + 3.4, d + 3.4, 0.5);
+  grp.traverse(o => { if (o.isMesh) { o.castShadow = !o.userData.noShadow; o.receiveShadow = true; } });
+  loveEnvGroup.add(grp);
+}
+
+// 單棟廢墟房屋：牆體＋塌陷屋頂＋破窗＋藤蔓＋瓦礫（已不再使用，保留以便還原）
 function buildRuinedHouse(x, z, side, wallColor, rotYOverride, roofColor) {
   const grp = new THREE.Group();
   grp.position.set(x, 0, z);
@@ -671,7 +1443,308 @@ function buildOvergrownTree(x, z) {
   loveEnvGroup.add(grp);
 }
 
-// 廢棄生鏽車輛
+// =============================================================
+// 廢棄車輛（優化版）：側視輪廓擠出的車身＋座艙＋玻璃＋輪胎輪拱＋車燈保險桿＋鏽斑苔蘚
+// 車型：sedan 轎車／suv／pickup 小貨卡／van 廂型車；局部座標 +x 為車頭
+// =============================================================
+const CAR_TYPES = {
+  sedan:  { front: 2.25, rear: -2.25, belt: 0.95, hood: 0.86, cab: [0.9, -1.25, 0.35, -0.85, 1.46], W: 1.8, wr: 0.36 },
+  suv:    { front: 2.3, rear: -2.35, belt: 1.05, hood: 0.95, cab: [1.05, -2.25, 0.65, -2.2, 1.75], W: 1.9, wr: 0.41 },
+  pickup: { front: 2.5, rear: -2.6, belt: 1.0, hood: 0.92, cab: [0.95, -0.4, 0.5, -0.35, 1.65], W: 1.9, wr: 0.42, bed: true },
+  van:    { front: 2.3, rear: -2.4, belt: 1.05, hood: 1.0, cab: [1.6, -2.3, 1.15, -2.3, 2.05], W: 1.95, wr: 0.4 },
+};
+let _carCrackTex = null;
+function carCrackTex() {
+  if (_carCrackTex) return _carCrackTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 128, 128);
+  g.fillStyle = 'rgba(30,45,55,0.85)'; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = 'rgba(235,240,245,0.9)'; g.lineWidth = 1.5;
+  const cx = 30 + Math.random() * 60, cy = 30 + Math.random() * 60;
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2 + Math.random() * 0.3, L = 30 + Math.random() * 60;
+    g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * L, cy + Math.sin(a) * L); g.stroke();
+  }
+  g.clearRect(cx - 12, cy - 10, 26, 22);   // 撞破的洞（alphaTest 會挖空）
+  g.clearRect(0, 0, 128, 16);
+  _carCrackTex = new THREE.CanvasTexture(c);
+  return _carCrackTex;
+}
+
+function buildCar(x, z, rotY, bodyColor, type) {
+  const T = CAR_TYPES[type] || CAR_TYPES.sedan;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const yaw = new THREE.Group();
+  yaw.position.set(x, 0.03, z);
+  yaw.rotation.y = rotY;
+  const grp = new THREE.Group();     // 內層：負責下陷傾斜（外層才轉向，避免傾斜軸跟著偏）
+  yaw.add(grp);
+  const std = (c, r, m) => new THREE.MeshStandardMaterial({ color: c, roughness: r == null ? 0.85 : r, metalness: m || 0 });
+  const paintCol = new THREE.Color(bodyColor).lerp(new THREE.Color(0x8a7f6d), 0.3);   // 褪色
+  const paint = new THREE.MeshPhysicalMaterial({ color: paintCol, roughness: 0.4, metalness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.35 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x33474f, roughness: 0.25, metalness: 0.3, side: THREE.DoubleSide });
+  const dark = std(0x1c1c1e, 0.9);
+  const rust = [0x8a4a2a, 0x6b3a22, 0x4f6a38];
+  const W = T.W, Bw = W / 2 + 0.05, belt = T.belt, front = T.front, rear = T.rear;
+  const [bF, bR, tF, tR, roofY] = T.cab;
+  const add = (geo, mat, px, py, pz) => { const m = new THREE.Mesh(geo, mat); m.position.set(px, py, pz); grp.add(m); return m; };
+
+  // 下車身：側視輪廓擠出
+  const lower = new THREE.Shape();
+  lower.moveTo(rear, 0.3); lower.lineTo(front, 0.3); lower.lineTo(front + 0.04, 0.62); lower.lineTo(front - 0.12, T.hood);
+  lower.lineTo(bF, belt); lower.lineTo(bR, belt); lower.lineTo(rear + 0.08, belt - 0.04); lower.lineTo(rear - 0.03, 0.7);
+  const lg = new THREE.ExtrudeGeometry(lower, { depth: W, bevelEnabled: true, bevelSize: 0.05, bevelThickness: 0.05, bevelSegments: 1 });
+  lg.translate(0, 0, -W / 2);
+  add(lg, paint, 0, 0, 0);
+
+  // 座艙（車頂）
+  const Wc = W - 0.16;
+  const cabS = new THREE.Shape();
+  cabS.moveTo(bF, belt - 0.02); cabS.lineTo(bR, belt - 0.02); cabS.lineTo(tR, roofY); cabS.lineTo(tF, roofY);
+  const cg = new THREE.ExtrudeGeometry(cabS, { depth: Wc, bevelEnabled: false });
+  cg.translate(0, 0, -Wc / 2);
+  add(cg, paint, 0, 0, 0);
+
+  // 側窗（座艙輪廓往內縮）＋B 柱
+  const cx0 = (bF + bR + tF + tR) / 4, cy0 = (belt + roofY) / 2;
+  const sh = (px, py) => [cx0 + (px - cx0) * 0.88, cy0 + (py - cy0) * 0.82];
+  const winS = new THREE.Shape();
+  [[bF, belt], [bR, belt], [tR, roofY], [tF, roofY]].map(p => sh(p[0], p[1])).forEach((p, i) => i ? winS.lineTo(p[0], p[1]) : winS.moveTo(p[0], p[1]));
+  const brokenSide = Math.random() < 0.3;
+  [-1, 1].forEach(s => {
+    const wm = new THREE.Mesh(new THREE.ShapeGeometry(winS), brokenSide && s > 0 ? dark : glassMat);
+    wm.position.z = s * (Wc / 2 + 0.012);
+    wm.scale.z = s;
+    grp.add(wm);
+    const pil = add(new THREE.BoxGeometry(0.1, roofY - belt - 0.2, 0.012), paint, (bF + bR) / 2 * 0.9 + (tF + tR) / 2 * 0.1, (belt + roofY) / 2, s * (Wc / 2 + 0.016));
+  });
+  // 擋風玻璃（常見破裂）與後窗
+  const slantQuad = (x0, y0, x1, y1, half, nx, ny, off, mat) => {
+    const t0 = 0.1, t1 = 0.9;
+    const P = t => [x0 + (x1 - x0) * t + nx * off, y0 + (y1 - y0) * t + ny * off];
+    const a = P(t0), b = P(t1);
+    const pos = new Float32Array([a[0], a[1], -half, a[0], a[1], half, b[0], b[1], half, b[0], b[1], -half]);
+    const uv = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setIndex([0, 1, 2, 0, 2, 3]);
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, mat); grp.add(m); return m;
+  };
+  const fl = Math.hypot(tF - bF, roofY - belt), rl = Math.hypot(tR - bR, roofY - belt);
+  const crackMat = new THREE.MeshStandardMaterial({ map: carCrackTex(), alphaTest: 0.5, roughness: 0.3, side: THREE.DoubleSide });
+  slantQuad(bF, belt, tF, roofY, Wc / 2 - 0.1, (roofY - belt) / fl, -(tF - bF) / fl, 0.012, Math.random() < 0.6 ? crackMat : glassMat);
+  slantQuad(bR, belt, tR, roofY, Wc / 2 - 0.1, -(roofY - belt) / rl, (tR - bR) / rl, 0.012, glassMat);
+
+  // 皮卡車斗：深色內底＋護欄
+  if (T.bed) {
+    const bx0 = bR - 0.05, bx1 = rear + 0.12, bl = bx0 - bx1;
+    const floor = add(new THREE.BoxGeometry(bl, 0.02, W - 0.2), std(0x2b2a28, 1), (bx0 + bx1) / 2, belt + 0.012, 0);
+    [-1, 1].forEach(s => add(new THREE.BoxGeometry(bl, 0.14, 0.05), paint, (bx0 + bx1) / 2, belt + 0.06, s * (W / 2 - 0.1)));
+    add(new THREE.BoxGeometry(0.05, 0.14, W - 0.15), paint, bx0, belt + 0.06, 0);
+  }
+
+  // 輪胎＋輪拱＋輪圈（其中一顆爆胎，車身往那側傾）
+  const wr = T.wr, flat = [[front - 0.85, 1], [front - 0.85, -1], [rear + 0.9, 1], [rear + 0.9, -1]][Math.floor(Math.random() * 4)];
+  [[front - 0.85, 1], [front - 0.85, -1], [rear + 0.9, 1], [rear + 0.9, -1]].forEach(([wx, sz]) => {
+    const isFlat = (wx === flat[0] && sz === flat[1]);
+    const r = isFlat ? wr * 0.78 : wr;
+    const tire = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.24, 14), std(0x23262b, 0.95));
+    tire.rotation.x = Math.PI / 2;
+    tire.position.set(wx, r, sz * (Bw - 0.1));
+    grp.add(tire);
+    const hub = new THREE.Mesh(new THREE.CircleGeometry(r * 0.58, 10), std(Math.random() < 0.5 ? 0x8a8d90 : 0x7a5a42, 0.5, 0.5));
+    hub.position.set(wx, r, sz * (Bw + 0.026));
+    if (sz < 0) hub.rotation.y = Math.PI;
+    grp.add(hub);
+    const arch = new THREE.Mesh(new THREE.CircleGeometry(wr * 1.2, 14, 0, Math.PI), dark);
+    arch.position.set(wx, wr, sz * (Bw + 0.006));
+    if (sz < 0) arch.rotation.y = Math.PI;
+    grp.add(arch);
+  });
+  grp.rotation.x = flat[1] * 0.028;
+  grp.rotation.z = flat[0] > 0 ? -0.02 : 0.02;
+
+  // 前後燈、保險桿、水箱罩、車牌、後視鏡
+  const lens = std(0xe8e2b8, 0.3), tail = std(0x9b2d2d, 0.4);
+  [-1, 1].forEach(s => {
+    add(new THREE.BoxGeometry(0.06, 0.14, 0.32), Math.random() < 0.25 ? dark : lens, front + 0.06, 0.64, s * W * 0.31);
+    add(new THREE.BoxGeometry(0.06, 0.14, 0.3), tail, rear - 0.02, 0.72, s * W * 0.31);
+    add(new THREE.BoxGeometry(0.12, 0.08, 0.06), paint, bF - 0.1, belt + 0.1, s * (Bw + 0.1));
+  });
+  add(new THREE.BoxGeometry(0.04, 0.2, W * 0.46), dark, front + 0.08, 0.5, 0);
+  add(new THREE.BoxGeometry(0.14, 0.17, W + 0.1), std(0x7d7d79, 0.5, 0.4), front + 0.1, 0.38, 0);
+  add(new THREE.BoxGeometry(0.14, 0.17, W + 0.1), std(0x7d7d79, 0.5, 0.4), rear - 0.08, 0.38, 0);
+  add(new THREE.BoxGeometry(0.02, 0.14, 0.36), std(0xe6e6df, 0.8), rear - 0.08, 0.58, 0);
+
+  // 門縫與門把
+  [-1, 1].forEach(s => {
+    [bF - 0.12, (bF + bR) / 2 - 0.2, bR + 0.18].forEach(dx => {
+      add(new THREE.BoxGeometry(0.015, belt - 0.38, 0.008), dark, dx, (belt + 0.38) / 2, s * (Bw + 0.004));
+    });
+    add(new THREE.BoxGeometry(0.14, 0.03, 0.03), std(0x888888, 0.5, 0.5), (bF + bR) / 2 + 0.18, belt - 0.12, s * (Bw + 0.01));
+  });
+
+  // 鏽斑、泥垢、苔蘚補丁（半透明貼片）
+  for (let i = 0; i < 9; i++) {
+    const rp = new THREE.Mesh(new THREE.PlaneGeometry(rnd(0.3, 0.9), rnd(0.15, 0.4)),
+      new THREE.MeshStandardMaterial({ color: rust[Math.floor(Math.random() * 3)], roughness: 1, transparent: true, opacity: 0.7 }));
+    const s = Math.random() < 0.5 ? 1 : -1;
+    rp.position.set(rnd(rear + 0.4, front - 0.4), rnd(0.4, belt - 0.1), s * (Bw + 0.012));
+    if (s < 0) rp.rotation.y = Math.PI;
+    grp.add(rp);
+  }
+  const moss = std(0x5b7d3f, 1), vine = std(0x4d7338, 1);
+  for (let i = 0; i < 4; i++) {   // 車頂與引擎蓋上的苔蘚
+    const m = add(new THREE.IcosahedronGeometry(rnd(0.15, 0.32), 0), Math.random() < 0.5 ? moss : vine,
+      rnd(tR, tF), roofY + 0.03, rnd(-0.55, 0.55));
+    m.scale.set(1.4, 0.3, 1.4);
+  }
+  for (let i = 0; i < 3; i++) {
+    const m = add(new THREE.IcosahedronGeometry(rnd(0.15, 0.3), 0), moss, rnd(bF + 0.2, front - 0.3), T.hood + 0.02, rnd(-0.6, 0.6));
+    m.scale.set(1.5, 0.3, 1.3);
+  }
+  for (let i = 0; i < 12; i++) {   // 車底與輪子旁長出的雜草
+    const g = add(new THREE.ConeGeometry(rnd(0.04, 0.08), rnd(0.3, 0.8), 4), Math.random() < 0.5 ? moss : vine,
+      rnd(rear, front), 0.22, (Math.random() < 0.5 ? -1 : 1) * (Bw + rnd(-0.1, 0.35)));
+    g.rotation.set(rnd(-0.4, 0.4), 0, rnd(-0.4, 0.4));
+  }
+
+  grp.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  addContactShadow(yaw, 0, 0, 5.6, 2.9, 0.55);
+  loveEnvGroup.add(yaw);
+  const c = Math.abs(Math.cos(rotY)), s2 = Math.abs(Math.sin(rotY));
+  loveObstacles.push({ x, z, hw: c * 2.6 + s2 * 1.2, hd: s2 * 2.6 + c * 1.2 });
+}
+
+function buildLoveCars() {
+  [
+    ['sedan', 8, 2.2, 0.35, 0xe84f34],
+    ['suv', -22, -2.8, -1.1, 0x2e9df0],
+    ['pickup', -52, 2.4, Math.PI + 0.08, 0xf2c14e],
+    ['van', 27, -2.5, -0.12, 0xe7e2d6],
+    ['sedan', 52, 2.0, 0.2, 0x6fbf73],
+    ['sedan', -42.4, 19, Math.PI / 2 + 0.12, 0xd96b8c],
+    ['pickup', 42, -23, -Math.PI / 2 + 0.05, 0x9b6fd1],
+    ['van', 0.4, 27, Math.PI / 2 - 0.1, 0xe84f34],
+    ['sedan', -26, 42.3, 0.08, 0x2e9df0],
+    ['suv', 33, -41.7, Math.PI - 0.1, 0xf2c14e],
+  ].forEach(([type, x, z, rotY, color]) => {
+    if (!loveBlocked(x, z, 0)) buildCar(x, z, rotY, color, type);
+  });
+}
+
+// =============================================================
+// 街道小物件：消防栓、停止標誌、路燈、垃圾桶、交通錐（歪倒、長苔、鏽蝕）
+// =============================================================
+function buildLoveProp(kind) {
+  const grp = new THREE.Group();
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const std = (c, r, m) => new THREE.MeshStandardMaterial({ color: c, roughness: r == null ? 0.85 : r, metalness: m || 0 });
+  const add = (geo, mat, px, py, pz) => { const m = new THREE.Mesh(geo, mat); m.position.set(px, py, pz); grp.add(m); return m; };
+  const moss = std(0x5b7d3f, 1);
+
+  if (kind === 'hydrant') {
+    const red = std(0xa8483a, 0.7), gold = std(0xc9b86a, 0.5, 0.3);
+    add(new THREE.CylinderGeometry(0.2, 0.22, 0.08, 10), red, 0, 0.04, 0);
+    add(new THREE.CylinderGeometry(0.15, 0.18, 0.6, 10), red, 0, 0.38, 0);
+    add(new THREE.SphereGeometry(0.16, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), red, 0, 0.68, 0);
+    add(new THREE.CylinderGeometry(0.06, 0.06, 0.08, 8), gold, 0, 0.86, 0);
+    [-1, 1].forEach(s => {
+      add(new THREE.CylinderGeometry(0.065, 0.065, 0.18, 8), red, s * 0.2, 0.5, 0).rotation.z = Math.PI / 2;
+      add(new THREE.CylinderGeometry(0.08, 0.08, 0.04, 8), gold, s * 0.3, 0.5, 0).rotation.z = Math.PI / 2;
+    });
+    add(new THREE.CylinderGeometry(0.075, 0.075, 0.16, 8), red, 0, 0.46, 0.18).rotation.x = Math.PI / 2;
+    const m = add(new THREE.IcosahedronGeometry(0.16, 0), moss, 0.1, 0.1, 0.1); m.scale.set(1.3, 0.5, 1.3);
+  } else if (kind === 'stop') {
+    add(new THREE.CylinderGeometry(0.045, 0.05, 2.5, 8), std(0x777b80, 0.6, 0.4), 0, 1.25, 0);
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    const oct = (r) => { g.beginPath(); for (let k = 0; k < 8; k++) { const a = Math.PI / 8 + k * Math.PI / 4; g.lineTo(64 + Math.cos(a) * r, 64 - Math.sin(a) * r); } g.closePath(); };
+    g.fillStyle = '#e8e4d8'; oct(64); g.fill();
+    g.fillStyle = '#a8312c'; oct(58); g.fill();
+    g.fillStyle = '#e8e4d8'; g.font = 'bold 34px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('STOP', 64, 66);
+    g.fillStyle = 'rgba(80,100,60,0.35)'; g.beginPath(); g.arc(30, 100, 26, 0, 7); g.fill();   // 青苔
+    const faceMat = new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(c), roughness: 0.6, alphaTest: 0.5 });
+    const face = add(new THREE.CircleGeometry(0.42, 8, Math.PI / 8, Math.PI * 2), faceMat, 0, 2.3, 0.032);
+    const back = add(new THREE.CircleGeometry(0.42, 8, Math.PI / 8, Math.PI * 2), std(0x6b6e72, 0.7, 0.3), 0, 2.3, 0.026);
+    back.rotation.y = Math.PI; back.position.z = 0.025;
+    face.rotation.z = 0;
+    const v = add(new THREE.IcosahedronGeometry(0.2, 0), std(0x4d7338, 1), 0.04, 0.5, 0.06); v.scale.set(0.6, 2.2, 0.6);
+  } else if (kind === 'lamp') {
+    const pole = std(0x5d6168, 0.6, 0.4);
+    add(new THREE.CylinderGeometry(0.1, 0.16, 0.5, 8), pole, 0, 0.25, 0);
+    add(new THREE.CylinderGeometry(0.07, 0.1, 5.2, 8), pole, 0, 2.8, 0);
+    const arm = add(new THREE.BoxGeometry(1.3, 0.07, 0.07), pole, 0.6, 5.4, 0);
+    arm.rotation.z = 0.08;
+    add(new THREE.BoxGeometry(0.55, 0.12, 0.28), std(0x4a4d54, 0.6, 0.4), 1.2, 5.38, 0);
+    add(new THREE.BoxGeometry(0.4, 0.04, 0.2), std(Math.random() < 0.5 ? 0xd7d3b8 : 0x2a2d33, 0.3), 1.2, 5.3, 0);   // 燈罩（有的破了）
+    for (let i = 0; i < 4; i++) {
+      const v = add(new THREE.IcosahedronGeometry(0.16, 0), std(0x4d7338, 1), rnd(-0.05, 0.05), 0.5 + i * 0.9, rnd(-0.05, 0.05));
+      v.scale.set(0.8, 1.6, 0.8);
+    }
+  } else if (kind === 'trash') {
+    const body = std(0x4f6a58, 0.8);
+    add(new THREE.CylinderGeometry(0.3, 0.25, 0.8, 12), body, 0, 0.4, 0);
+    add(new THREE.CylinderGeometry(0.33, 0.33, 0.06, 12), std(0x3c5244, 0.8), 0, 0.83, 0);
+    [0.2, 0.55].forEach(y => add(new THREE.TorusGeometry(0.29 - (y < 0.3 ? 0.03 : 0), 0.015, 5, 14), std(0x3c5244, 0.8), 0, y, 0).rotation.x = Math.PI / 2);
+    const m = add(new THREE.IcosahedronGeometry(0.2, 0), moss, 0.1, 0.88, 0); m.scale.set(1.3, 0.4, 1.3);
+  } else if (kind === 'cone') {
+    add(new THREE.BoxGeometry(0.42, 0.04, 0.42), std(0xc4551f, 0.8), 0, 0.02, 0);
+    add(new THREE.ConeGeometry(0.17, 0.6, 12), std(0xe2702a, 0.8), 0, 0.34, 0);
+    add(new THREE.CylinderGeometry(0.1, 0.12, 0.09, 12), std(0xe9e6da, 0.8), 0, 0.33, 0);
+    const m = add(new THREE.IcosahedronGeometry(0.11, 0), moss, 0.1, 0.06, 0.1); m.scale.set(1.4, 0.4, 1.4);
+  }
+  grp.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return grp;
+}
+
+function buildLoveStreetProps() {
+  const rndR = (a, b) => a + Math.random() * (b - a);
+  const place = (kind, x, z, opt) => {
+    if (loveBlocked(x, z, 0.4)) return;
+    const p = buildLoveProp(kind);
+    p.position.set(x, opt && opt.y != null ? opt.y : 0.03, z);
+    p.rotation.y = opt && opt.rotY != null ? opt.rotY : rndR(0, Math.PI * 2);
+    if (opt && opt.tilt) { p.rotation.z = opt.tilt; }
+    if (opt && opt.fallen) { p.rotation.z = Math.PI / 2 * (Math.random() < 0.5 ? 1 : -1); p.position.y = 0.3; }
+    loveEnvGroup.add(p);
+    loveObstacles.push({ x, z, hw: 0.6, hd: 0.6 });
+  };
+  // 路口：停止標誌（對角兩角）與消防栓
+  LOVE_CROSS_STREETS.forEach((xs, i) => {
+    [[1, 1], [-1, -1]].forEach(([sx, sz]) => {
+      const px = xs + sx * 5.5, pz = sz * 5.4;
+      place('stop', px, pz, { rotY: Math.atan2(xs - px, -pz), tilt: rndR(-0.12, 0.12) });
+    });
+    place('hydrant', xs + (i % 2 ? -1 : 1) * 7.2, (i % 2 ? 1 : -1) * 6.2, { rotY: rndR(0, 6) });
+  });
+  // 路燈：主幹道兩側，有的歪斜、有的倒下
+  [-58, -34, -18, 18, 34, 58].forEach((lx, i) => {
+    [-1, 1].forEach(s => {
+      const r = Math.random();
+      const px = lx + rndR(-2, 2), pz = s * 6.3;
+      place('lamp', px, pz, { rotY: s > 0 ? Math.PI : 0, tilt: r < 0.3 ? rndR(-0.35, 0.35) : 0, fallen: false });
+    });
+  });
+  // 垃圾桶（部分翻倒）
+  for (let i = 0; i < 9; i++) {
+    const s = Math.random() < 0.5 ? -1 : 1;
+    place('trash', rndR(-60, 60), s * rndR(5.4, 6.2), { fallen: Math.random() < 0.4 });
+  }
+  // 交通錐：散落在路上
+  for (let k = 0; k < 2; k++) {
+    const cx = rndR(-50, 50), cz = rndR(-3, 3);
+    if (Math.hypot(cx, cz) < 8) continue;
+    for (let i = 0; i < 3; i++) place('cone', cx + rndR(-1.2, 1.2), cz + rndR(-0.8, 0.8), { fallen: Math.random() < 0.4, y: 0.05 });
+  }
+}
+
+// 廢棄生鏽車輛（舊版方塊車，已不再使用，保留以便還原）
 function buildRustedCar(x, z, rotY, bodyColor) {
   const grp = new THREE.Group();
   grp.position.set(x, 0.05, z);
@@ -871,29 +1944,214 @@ function buildLoveRelics() {
     const relic = createLoveRelic(kinds[Math.floor(Math.random() * kinds.length)]);
     relic.scale.setScalar(2.0); // 再放大：小物件遠看太不起眼
     relic.position.set(x, 0.08, z);
+    relic.userData.baseY = 0.08; // 覓食時會被牽引飄起，記住原本高度才飄得回來
     relic.rotation.y = Math.random() * Math.PI * 2;
     loveEnvGroup.add(relic);
     loveRelics.push(relic); // 登記：覓食時要從這裡拉光線
   }
-  // 覓食光線：每顆遺物一條淡淡的線，端點每幀跟愛的位置走
+  buildLoveFeedSystem();
+}
+
+// =============================================================
+// 覓食光絲（渴望覓食）
+//  FIXED-012: 舊版 80 條直線一次全連到愛身上、很亂 → 只連最近 12 顆、依序長出、雙螺旋弧線＋光點流（截圖驗證近景／拉遠）
+//  舊版：80 顆遺物各一條直線連到愛身上 → 一團亂線。
+//  新版：
+//   1. 只連離愛最近的 LOVE_FEED_SLOTS 顆（愛移動時自動換成新的最近者）
+//   2. 由近到遠依序「長」出去（光絲從愛身上伸向遺物），不是一次全出現
+//   3. 光絲是雙螺旋弧線（兩條反相位互相纏繞，中間鼓、兩端收回愛與遺物），會緩緩旋轉
+//   4. 遺物被牽引：慢慢飄起來、自轉、底下亮起光暈
+//   5. 一顆顆發光光點沿螺旋從遺物流向愛，到愛身上縮小消失＝被吸收
+// =============================================================
+const LOVE_FEED_SLOTS = 12;   // 同時最多連幾顆
+const LOVE_FEED_RANGE = 30;   // 只連這個距離內的遺物
+const LOVE_FEED_SEG = 44;     // 每條光絲分幾段（越多越圓滑）
+const LOVE_FEED_MOTES = 9;    // 每個槽位同時流動的光點數
+
+function makeLoveGlowTexture() {
+  // 柔邊圓光點：白熱的中心 → 透明（顏色由材質決定）
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.3, 'rgba(255,255,255,0.85)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+
+function buildLoveFeedSystem() {
   loveFeedGroup = new THREE.Group();
   loveFeedGroup.visible = false;
   loveEnvGroup.add(loveFeedGroup);
-  loveRelics.forEach((relic) => {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-    const mat = new THREE.LineBasicMaterial({
-      color: 0xffb84d, // 暖金，亮場景也看得到
-      transparent: true,
-      opacity: 0.35, // 淡淡的
-      depthWrite: false,
+  const tex = makeLoveGlowTexture();
+
+  for (let i = 0; i < LOVE_FEED_SLOTS; i++) {
+    const slot = { relic: null, leaving: false, age: 0, g: 0, rank: 0, phase: 0, twist: 1, dir: 1, lines: [], motes: [], halo: null };
+    // 雙股螺旋：兩條線
+    for (let st = 0; st < 2; st++) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array((LOVE_FEED_SEG + 1) * 3), 3));
+      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+        color: st === 0 ? 0xff8f1f : 0xffb347, // 兩股深淺不同的暖金橘，亮場景也看得到
+        transparent: true,
+        opacity: 0.7,
+        depthWrite: false,
+      }));
+      line.frustumCulled = false; // 端點每幀變動，關掉剔除
+      line.visible = false;
+      loveFeedGroup.add(line);
+      slot.lines.push(line);
+    }
+    // 流動光點（每顆自己的 Sprite，才能各自縮放與淡出）
+    for (let j = 0; j < LOVE_FEED_MOTES; j++) {
+      const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: 0xff9a1a, transparent: true, depthWrite: false }));
+      m.visible = false;
+      loveFeedGroup.add(m);
+      slot.motes.push(m);
+    }
+    // 遺物底下的光暈
+    slot.halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: 0xffc04d, transparent: true, depthWrite: false }));
+    slot.halo.visible = false;
+    loveFeedGroup.add(slot.halo);
+    loveFeedSlots.push(slot);
+  }
+}
+
+// 槽位放掉遺物：遺物落回原位、光絲與光點全部隱藏
+function releaseLoveFeedSlot(s) {
+  if (s.relic) s.relic.position.y = s.relic.userData.baseY;
+  s.relic = null;
+  s.leaving = false;
+  s.g = 0;
+  s.lines.forEach((l) => { l.visible = false; });
+  s.motes.forEach((m) => { m.visible = false; });
+  s.halo.visible = false;
+}
+
+function updateLoveFeed(time, dt) {
+  // 沒在覓食、光線也淡完了：全部收好
+  if (!isLoveFeeding && loveFeedFactor <= 0.02) {
+    for (const s of loveFeedSlots) if (s.relic) releaseLoveFeedSlot(s);
+    return;
+  }
+  const L = loveGroup.position;
+
+  // 每 0.35 秒重選一次「最近的 N 顆」（愛在動，最近的會換）
+  loveFeedPickT -= dt;
+  if (loveFeedPickT <= 0) {
+    loveFeedPickT = 0.35;
+    const cands = [];
+    if (isLoveFeeding) {
+      for (const r of loveRelics) {
+        const d = Math.hypot(r.position.x - L.x, r.userData.baseY + 0.6 - L.y, r.position.z - L.z);
+        if (d < LOVE_FEED_RANGE) cands.push({ r, d });
+      }
+    }
+    cands.sort((p, q) => p.d - q.d);
+    const wanted = cands.slice(0, LOVE_FEED_SLOTS);
+    const wantedSet = new Set(wanted.map((c) => c.r));
+    for (const s of loveFeedSlots) if (s.relic) s.leaving = !wantedSet.has(s.relic);
+    wanted.forEach((c, rank) => {
+      const have = loveFeedSlots.find((s) => s.relic === c.r);
+      if (have) { have.rank = rank; return; }
+      const free = loveFeedSlots.find((s) => !s.relic);
+      if (!free) return;
+      free.relic = c.r;
+      free.leaving = false;
+      free.age = 0;
+      free.g = 0;
+      free.rank = rank; // 越近越先長出去
+      free.phase = Math.random() * Math.PI * 2;
+      free.twist = 0.9 + Math.random() * 0.7; // 螺旋圈數
+      free.dir = Math.random() < 0.5 ? 1 : -1; // 順／逆時針
     });
-    const line = new THREE.Line(geo, mat);
-    line.frustumCulled = false; // 端點每幀變動，關掉剔除才不會線拉長時消失
-    line.userData.relic = relic;
-    loveFeedGroup.add(line);
-    loveFeedLines.push(line);
-  });
+  }
+
+  const fade = loveFeedFactor;
+  for (const s of loveFeedSlots) {
+    const r = s.relic;
+    if (!r) continue;
+
+    // g：這條光絲長了多少（0→1）。離開時快速縮回
+    if (s.leaving) s.g = Math.max(0, s.g - dt * 2.5);
+    else {
+      s.age += dt;
+      const x = Math.min(1, Math.max(0, (s.age - s.rank * 0.09) / 0.9));
+      s.g = x * x * (3 - 2 * x);
+    }
+    if (s.leaving && s.g <= 0.001) { releaseLoveFeedSlot(s); continue; }
+    const g = s.g;
+
+    // 遺物被牽引：飄起來、慢慢自轉
+    r.position.y = r.userData.baseY + (0.9 + 0.25 * Math.sin(time * 2 + s.phase)) * g;
+    r.rotation.y += dt * 0.9 * g;
+
+    // 光絲兩端：A＝愛、B＝遺物
+    const ax = L.x, ay = L.y, az = L.z;
+    const bx = r.position.x, by = r.position.y + 0.6, bz = r.position.z;
+    const dx = bx - ax, dy = by - ay, dz = bz - az;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const nx = dx / len, ny = dy / len, nz = dz / len;
+    // 垂直於光絲方向的兩個軸 u、v（螺旋繞著它轉）
+    let ux = -nz, uz = nx;
+    const ul = Math.hypot(ux, uz);
+    if (ul < 1e-3) { ux = 1; uz = 0; } else { ux /= ul; uz /= ul; }
+    const vx = ny * uz, vy = nz * ux - nx * uz, vz = -ny * ux;
+    const amp = Math.min(2.2, 0.35 + len * 0.06); // 螺旋鼓出的半徑
+    const arch = Math.min(4, len * 0.1);          // 整條光絲向上拱起的高度
+
+    // 曲線上 pt（0=愛，1=遺物）、相位 phi 的點，寫進 out[o..o+2]
+    const pointAt = (pt, phi, out, o) => {
+      const env = Math.sin(Math.PI * pt); // 兩端收回、中間最鼓
+      const k = amp * Math.pow(env, 0.9);
+      const c = Math.cos(phi) * k, sn = Math.sin(phi) * k;
+      out[o] = ax + dx * pt + ux * c + vx * sn;
+      out[o + 1] = ay + dy * pt + arch * env + vy * sn;
+      out[o + 2] = az + dz * pt + uz * c + vz * sn;
+    };
+
+    // 雙股螺旋（光絲從愛的身上往遺物「長」：只畫到 pt = g）
+    for (let st = 0; st < 2; st++) {
+      const line = s.lines[st];
+      const pos = line.geometry.attributes.position.array;
+      for (let i = 0; i <= LOVE_FEED_SEG; i++) {
+        const pt = (i / LOVE_FEED_SEG) * g;
+        const phi = s.dir * s.twist * 2 * Math.PI * pt + time * 1.4 + s.phase + st * Math.PI;
+        pointAt(pt, phi, pos, i * 3);
+      }
+      line.geometry.attributes.position.needsUpdate = true;
+      line.material.opacity = 0.7 * fade;
+      line.visible = true;
+    }
+
+    // 光點：長到遺物之後，一顆顆從遺物沿螺旋流向愛，到愛身上縮小＝被吸收
+    const tmp = s._tmp || (s._tmp = [0, 0, 0]);
+    for (let j = 0; j < LOVE_FEED_MOTES; j++) {
+      const m = s.motes[j];
+      if (g < 0.97) { m.visible = false; continue; }
+      const p = (((time * 0.32 + j / LOVE_FEED_MOTES + s.phase) % 1) + 1) % 1; // 0=剛離開遺物 1=抵達愛
+      const pt = 1 - p;
+      const phi = s.dir * s.twist * 2 * Math.PI * pt + time * 1.4 + s.phase;
+      pointAt(pt, phi, tmp, 0);
+      m.position.set(tmp[0], tmp[1], tmp[2]);
+      // 光點大小：中段最大、兩端縮到 0；離鏡頭越近縮越多（不然近景會變成一大團金色模糊蓋住愛）
+      const camD = camera.position.distanceTo(m.position);
+      const sz = (0.18 + 0.34 * Math.sin(Math.PI * p)) * Math.min(1, Math.max(0.25, camD / 14));
+      m.scale.set(sz, sz, 1);
+      m.material.opacity = fade * Math.pow(Math.sin(Math.PI * p), 0.6);
+      m.visible = true;
+    }
+
+    // 遺物底下的光暈
+    s.halo.position.set(bx, by, bz);
+    const hs = 1.5 + 0.3 * Math.sin(time * 3 + s.phase);
+    s.halo.scale.set(hs, hs, 1);
+    s.halo.material.opacity = 0.45 * g * fade;
+    s.halo.visible = true;
+  }
 }
 
 // -------------------------------------------------------------
@@ -901,7 +2159,410 @@ function buildLoveRelics() {
 // 特徵：雙層拱廊外圈、兩段塌毀缺口、石灰華暖米色、沙地競技區、
 //      傾倒柱身、斷柱與瓦礫、縫裡鑽出的乾雜草
 // -------------------------------------------------------------
+// 羞恥環境（優化版）：依羅馬競技場真實結構建模
+//  - 橢圓平面；外環三層拱廊（托斯卡尼／愛奧尼／科林斯半柱）＋頂部閣樓（長方窗＋托石）
+//  - 真實殘況：北側（鏡頭後方）外環仍完整，南側外環在 1349 年地震後塌毀，露出內環；斷口呈階梯狀
+//  - 內環＋階梯看台（cavea）＋放射狀磚牆；競技場地板大半不存，露出地下室（hypogeum）磚牆格網
+//  - 石灰華（travertine）塊石貼圖＋鐵夾孔蝕痕；內部露出的是磚與混凝土
+// 參考：羅馬競技場三層 80 拱、橢圓 188×156 m、地下室後加（皇帝圖密善）、南側外環 1349 年倒塌
 function buildShameEnvironment() {
+  shameEnvGroup = new THREE.Group();
+  shameEnvGroup.visible = false;
+  scene.add(shameEnvGroup);
+  const G = shameEnvGroup;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const TAU = Math.PI * 2;
+  const pt = (A, B, t) => [A * Math.sin(t), B * Math.cos(t)];   // 橢圓：t=0 在 +z，t=π 在 -z（鏡頭後方＝北側）
+
+  // ---------- 貼圖 ----------
+  const mkTex = (draw, size, repU, repV) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    draw(c.getContext('2d'), size);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(repU, repV == null ? repU : repV);
+    t.anisotropy = 4;
+    return t;
+  };
+  // 石灰華：水平砌層＋錯縫＋蝕孔（鐵夾被取走留下的洞）＋汙漬
+  const travTex = mkTex((g, s) => {
+    g.fillStyle = '#d3c7a9'; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 900; i++) {
+      g.fillStyle = Math.random() < 0.5 ? 'rgba(255,250,230,0.10)' : 'rgba(110,95,70,0.10)';
+      g.fillRect(Math.random() * s, Math.random() * s, 1 + Math.random() * 3, 1 + Math.random() * 2);
+    }
+    for (let c = 0; c < 4; c++) {
+      const y = c * 64, bw = c % 2 ? 96 : 128, off = c % 2 ? 40 : 0;
+      g.fillStyle = 'rgba(80,68,48,0.55)'; g.fillRect(0, y, s, 2);
+      for (let x = -off; x < s; x += bw) g.fillRect(x, y, 2, 64);
+    }
+    for (let i = 0; i < 150; i++) {   // 蝕孔
+      g.fillStyle = 'rgba(70,58,40,0.45)';
+      g.beginPath(); g.ellipse(Math.random() * s, Math.random() * s, 1 + Math.random() * 2.5, 1 + Math.random() * 2, 0, 0, TAU); g.fill();
+    }
+    for (let i = 0; i < 7; i++) {     // 雨水汙漬與地衣
+      g.fillStyle = Math.random() < 0.6 ? 'rgba(120,100,70,0.12)' : 'rgba(110,125,80,0.14)';
+      g.fillRect(Math.random() * s, Math.random() * s * 0.6, 12 + Math.random() * 30, 40 + Math.random() * 100);
+    }
+  }, 256, 0.5);
+  const brickTex = mkTex((g, s) => {
+    g.fillStyle = '#c4b393'; g.fillRect(0, 0, s, s);   // 灰漿
+    const cols = ['#a65f43', '#9a553b', '#b06b4c', '#8f5038', '#a9704f'];
+    for (let r = 0; r < 8; r++) {
+      const y = r * 16, off = r % 2 ? 14 : 0;
+      for (let x = -off; x < s; x += 28) {
+        g.fillStyle = cols[Math.floor(Math.random() * cols.length)];
+        g.fillRect(x + 1, y + 1, 26, 14);
+      }
+    }
+    for (let i = 0; i < 300; i++) { g.fillStyle = 'rgba(40,30,20,0.12)'; g.fillRect(Math.random() * s, Math.random() * s, 2, 2); }
+  }, 128, 1);
+  const sandTex = mkTex((g, s) => {
+    g.fillStyle = '#c3b08a'; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 4000; i++) {
+      g.fillStyle = Math.random() < 0.5 ? 'rgba(255,245,215,0.18)' : 'rgba(110,90,60,0.14)';
+      g.fillRect(Math.random() * s, Math.random() * s, 1 + Math.random() * 2, 1);
+    }
+  }, 256, 0.17);
+
+  // ---------- 材質 ----------
+  const travMats = [0xeae4d2, 0xd8d0b8, 0xc4baa0, 0xb0a78e, 0xa09a86].map(c => new THREE.MeshStandardMaterial({ map: travTex, color: c, roughness: 0.95 }));
+  const pickTrav = () => travMats[Math.floor(Math.random() * travMats.length)];
+  const brickMat = new THREE.MeshStandardMaterial({ map: brickTex, color: 0xe6d6c4, roughness: 1 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x2b241c, roughness: 1, side: THREE.DoubleSide });
+  const mossMat = new THREE.MeshStandardMaterial({ color: 0x7a8447, roughness: 1 });
+  const dryMat = new THREE.MeshStandardMaterial({ color: 0x8c8a52, roughness: 1 });
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x6b5238, roughness: 1 });
+
+  // ---------- 小工具 ----------
+  // 盒子 UV 換成公尺單位（貼圖才不會被拉伸）
+  const stoneBox = (w, h, d) => {
+    const g = new THREE.BoxGeometry(w, h, d);
+    const uv = g.attributes.uv;
+    const dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+    for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) {
+      const i = f * 4 + v;
+      uv.setXY(i, uv.getX(i) * dims[f][0], uv.getY(i) * dims[f][1]);
+    }
+    return g;
+  };
+  const sMesh = (geo, mat, x, y, z, parent) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.castShadow = true; m.receiveShadow = true;
+    (parent || G).add(m);
+    return m;
+  };
+  const sBox = (w, h, d, mat, x, y, z, parent) => sMesh(stoneBox(w, h, d), mat, x, y, z, parent);
+  // 橢圓扇形環（看台、台座牆）：半軸 a1,b1（內）→ a2,b2（外），角度 t0→t1，高 h
+  const sectorGeo = (a1, b1, a2, b2, t0, t1, h) => {
+    const sh = new THREE.Shape();
+    const n = Math.max(2, Math.ceil((t1 - t0) / 0.08));
+    for (let k = 0; k <= n; k++) { const [x, z] = pt(a2, b2, t0 + (t1 - t0) * k / n); k ? sh.lineTo(x, -z) : sh.moveTo(x, -z); }
+    for (let k = n; k >= 0; k--) { const [x, z] = pt(a1, b1, t0 + (t1 - t0) * k / n); sh.lineTo(x, -z); }
+    const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false });
+    g.rotateX(-Math.PI / 2);
+    return g;
+  };
+  const angDist = (t) => Math.abs(Math.atan2(Math.sin(t - Math.PI), Math.cos(t - Math.PI)));   // 離「北側」(t=π) 的角距
+
+  // ---------- 地面 ----------
+
+  // 競技場地板：沙地橢圓，中央挖出地下室（hypogeum）
+  const AR_A = 17.5, AR_B = 14.0, PIT_X = 10, PIT_Z = 2.0, PIT_Y = -2.5;
+  const arenaShape = new THREE.Shape();
+  arenaShape.absellipse(0, 0, AR_A, AR_B, 0, TAU, false, 0);
+  const hole = new THREE.Path();
+  hole.moveTo(-PIT_X, -PIT_Z); hole.lineTo(-PIT_X, PIT_Z); hole.lineTo(PIT_X, PIT_Z); hole.lineTo(PIT_X, -PIT_Z); hole.lineTo(-PIT_X, -PIT_Z);
+  arenaShape.holes.push(hole);
+  // 外圈夯土：同樣在地下室處挖洞，否則會蓋住地下室
+  const dirtShape = new THREE.Shape();
+  dirtShape.moveTo(-85, -85); dirtShape.lineTo(-85, 85); dirtShape.lineTo(85, 85); dirtShape.lineTo(85, -85); dirtShape.lineTo(-85, -85);
+  const dirtHole = new THREE.Path();
+  dirtHole.moveTo(-PIT_X, -PIT_Z); dirtHole.lineTo(-PIT_X, PIT_Z); dirtHole.lineTo(PIT_X, PIT_Z); dirtHole.lineTo(PIT_X, -PIT_Z); dirtHole.lineTo(-PIT_X, -PIT_Z);
+  dirtShape.holes.push(dirtHole);
+  const dirt = new THREE.Mesh(new THREE.ShapeGeometry(dirtShape), new THREE.MeshStandardMaterial({ color: 0x968868, roughness: 1 }));
+  dirt.rotation.x = -Math.PI / 2; dirt.position.y = -0.02; dirt.receiveShadow = true;
+  G.add(dirt);
+  const arena = new THREE.Mesh(new THREE.ShapeGeometry(arenaShape, 48), new THREE.MeshStandardMaterial({ map: sandTex, roughness: 1 }));
+  arena.rotation.x = -Math.PI / 2; arena.receiveShadow = true;
+  G.add(arena);
+
+  // 地下室：深色地面＋磚牆格網（長牆、橫牆、四周擋土牆；高度參差表示已損毀）
+  const pitFloor = new THREE.Mesh(new THREE.PlaneGeometry(PIT_X * 2, PIT_Z * 2), new THREE.MeshStandardMaterial({ color: 0x3a3228, roughness: 1 }));
+  pitFloor.rotation.x = -Math.PI / 2; pitFloor.position.y = PIT_Y; pitFloor.receiveShadow = true;
+  G.add(pitFloor);
+  const pitH = -PIT_Y;
+  [-1, 1].forEach(s => sBox(PIT_X * 2, pitH, 0.3, brickMat, 0, PIT_Y + pitH / 2, s * (PIT_Z - 0.15)));   // 兩側擋土牆
+  [-1, 1].forEach(s => sBox(0.3, pitH, PIT_Z * 2, brickMat, s * (PIT_X - 0.15), PIT_Y + pitH / 2, 0));   // 兩端擋土牆
+  [-0.9, 0.9].forEach(z => {                                      // 兩道縱向牆
+    for (let x = -PIT_X + 0.3; x < PIT_X - 0.3; x += 2.4) {
+      const h = rnd(0.9, pitH - 0.15);
+      sBox(2.3, h, 0.45, brickMat, x + 1.15, PIT_Y + h / 2, z);
+    }
+  });
+  for (let x = -8.4; x <= 8.4; x += 2.8) {                        // 橫向隔牆
+    const h = rnd(0.8, pitH - 0.15);
+    sBox(0.45, h, PIT_Z * 2 - 0.5, brickMat, x, PIT_Y + h / 2, 0);
+  }
+  for (let k = 0; k < 7; k++) {                                   // 東端殘留的木地板條（復原的一小段）
+    sBox(0.28, 0.06, PIT_Z * 2 + 0.2, woodMat, 7.6 + k * 0.33 + rnd(0, 0.04), -0.04, 0).rotation.y = rnd(-0.02, 0.02);
+  }
+
+  // ---------- 拱廊環 ----------
+  const dark = (w, h, y, zBack, parent) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), darkMat);
+    m.position.set(0, y + h / 2, zBack);
+    parent.add(m);
+  };
+  const buildRing = (cfg) => {
+    const N = cfg.N;
+    for (let i = 0; i < N; i++) {
+      const t0 = i / N * TAU, t1 = (i + 1) / N * TAU, tm = (t0 + t1) / 2;
+      const [x0, z0] = pt(cfg.A, cfg.B, t0), [x1, z1] = pt(cfg.A, cfg.B, t1);
+      const dx = x1 - x0, dz = z1 - z0, bw = Math.hypot(dx, dz);
+      const grp = new THREE.Group();
+      grp.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2);
+      grp.rotation.y = Math.atan2(-dz / bw, dx / bw);
+      G.add(grp);
+      const st = cfg.keep(i, angDist(tm));
+      if (st.jag) { grp.rotation.z = rnd(-0.05, 0.05); }   // 斷口處的殘牆微傾
+      const th = cfg.thick;
+      let y = 0;
+
+      if (st.tiers === 0) {   // 外環已不在：只剩低矮的基礎石
+        if (cfg.foundation) sBox(bw * 0.92, rnd(0.15, 0.7), th, pickTrav(), 0, 0.2, 0, grp);
+        continue;
+      }
+      for (let k = 0; k < Math.min(st.tiers, cfg.tiers.length); k++) {
+        const T = cfg.tiers[k];
+        const spring = T.H - T.ow - 0.7;
+        const isTop = (k === st.tiers - 1) && !st.attic;
+        const minH = spring + T.ow + 0.35;
+        const hl = (isTop && st.jag) ? rnd(minH, T.H) : T.H, hr = (isTop && st.jag) ? rnd(minH, T.H) : T.H;
+        const hw = bw / 2, ow = T.ow;
+        const sh = new THREE.Shape();
+        if (k === 0) {   // 底層：拱洞直通地面（U 形輪廓）
+          sh.moveTo(-hw, 0); sh.lineTo(-ow, 0); sh.lineTo(-ow, spring);
+          sh.absarc(0, spring, ow, Math.PI, 0, true);
+          sh.lineTo(ow, 0); sh.lineTo(hw, 0); sh.lineTo(hw, hr); sh.lineTo(-hw, hl); sh.lineTo(-hw, 0);
+        } else {         // 上層：窗台以上才開拱
+          sh.moveTo(-hw, 0); sh.lineTo(hw, 0); sh.lineTo(hw, hr); sh.lineTo(-hw, hl); sh.lineTo(-hw, 0);
+          const hp = new THREE.Path();
+          hp.moveTo(-ow, 0.5); hp.lineTo(-ow, spring);
+          hp.absarc(0, spring, ow, Math.PI, 0, true);
+          hp.lineTo(ow, 0.5); hp.lineTo(-ow, 0.5);
+          sh.holes.push(hp);
+        }
+        const wg = new THREE.ExtrudeGeometry(sh, { depth: th, bevelEnabled: false, curveSegments: 8 });
+        wg.translate(0, 0, -th / 2);
+        sMesh(wg, pickTrav(), 0, y, 0, grp);
+        dark(2 * ow + 0.2, T.H - 0.2, y + 0.1, 0, grp);
+        // 半柱（逐層：托斯卡尼→愛奧尼→科林斯）：柱礎＋柱身＋柱頭
+        if (!(isTop && st.jag)) {
+          const colH = T.H - 0.55;
+          const cm = pickTrav();
+          const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, colH, k === 0 ? 8 : 12), cm);
+          shaft.position.set(-hw, y + 0.2 + colH / 2, th / 2 + 0.1);
+          shaft.castShadow = true; grp.add(shaft);
+          sBox(0.8, 0.2, 0.8, cm, -hw, y + 0.1, th / 2 + 0.1, grp);
+          sBox(k === 2 ? 0.85 : 0.78, k === 2 ? 0.34 : 0.22, k === 2 ? 0.85 : 0.78, cm, -hw, y + T.H - 0.32, th / 2 + 0.1, grp);
+        }
+        if (!(isTop && st.jag)) sBox(bw + 0.1, 0.3, th + 0.5, pickTrav(), 0, y + T.H + 0.15, 0, grp);   // 層間腰線
+        y += T.H + 0.3;
+      }
+      // 閣樓：實牆＋方窗＋托石（外環完整處才有）
+      if (st.attic && cfg.attic) {
+        const AH = cfg.attic;
+        const sh = new THREE.Shape();
+        sh.moveTo(-bw / 2, 0); sh.lineTo(bw / 2, 0); sh.lineTo(bw / 2, AH); sh.lineTo(-bw / 2, AH); sh.lineTo(-bw / 2, 0);
+        if (i % 2 === 0) {
+          const hp = new THREE.Path();
+          hp.moveTo(-0.4, AH * 0.3); hp.lineTo(-0.4, AH * 0.3 + 1.2); hp.lineTo(0.4, AH * 0.3 + 1.2); hp.lineTo(0.4, AH * 0.3); hp.lineTo(-0.4, AH * 0.3);
+          sh.holes.push(hp);
+        }
+        const ag = new THREE.ExtrudeGeometry(sh, { depth: th - 0.2, bevelEnabled: false });
+        ag.translate(0, 0, -(th - 0.2) / 2);
+        sMesh(ag, pickTrav(), 0, y, 0, grp);
+        [-0.9, 0.9].forEach(cx => sBox(0.28, 0.5, 0.35, pickTrav(), cx, y + AH - 0.45, (th - 0.2) / 2 + 0.1, grp));   // 托石
+        sBox(bw + 0.1, 0.35, th + 0.5, pickTrav(), 0, y + AH + 0.17, 0, grp);
+        y += AH + 0.35;
+      } else if (st.stub) {
+        [-1, 1].forEach(s => sBox(0.9, rnd(0.4, 1.7), th * 0.85, pickTrav(), s * (bw / 2 - 0.5), y + 0.5, 0, grp).rotation.z = rnd(-0.1, 0.1));
+      }
+      // 牆頂：苔蘚與乾草
+      if (Math.random() < 0.9) {
+        const m = new THREE.Mesh(new THREE.IcosahedronGeometry(rnd(0.3, 0.8), 0), Math.random() < 0.5 ? mossMat : dryMat);
+        m.position.set(rnd(-bw / 2, bw / 2), y + 0.05, rnd(-th / 3, th / 3));
+        m.scale.set(1.4, 0.45, 1.2);
+        grp.add(m);
+      }
+    }
+  };
+
+  // 外環：北側完整（三層＋閣樓），向南逐層斷開成階梯狀，南側全毀
+  buildRing({
+    N: 44, A: 27, B: 22.5, thick: 1.5, foundation: true, attic: 2.4,
+    tiers: [{ H: 4.4, ow: 0.95 }, { H: 3.7, ow: 0.85 }, { H: 3.5, ow: 0.8 }],
+    keep: (i, d) => {
+      d += rnd(-0.12, 0.12);
+      let tiers = d < 1.4 ? 3 : d < 1.7 ? 2 : d < 1.95 ? 1 : 0;
+      if (tiers > 0 && Math.random() < 0.22) tiers--;   // 荒廢：到處有被啃掉的一層
+      const attic = tiers === 3 && d < 1.15 && Math.random() > 0.35;
+      const jag = tiers > 0 && !attic;
+      return { tiers, attic, jag: jag || Math.random() < 0.1, stub: jag && Math.random() < 0.5 };
+    },
+  });
+  // 內環：兩層拱廊；南側崩得更碎
+  buildRing({
+    N: 44, A: 22.2, B: 18.5, thick: 1.3, foundation: false, attic: 0,
+    tiers: [{ H: 4.4, ow: 0.8 }, { H: 3.6, ow: 0.75 }],
+    keep: (i, d) => {
+      let tiers = 2;
+      if (d > 1.6) { const r = Math.random(); tiers = r < 0.25 ? 2 : r < 0.75 ? 1 : 0; } else if (Math.random() < 0.15) tiers = 1;
+      return { tiers, attic: false, jag: tiers < 2 || (d > 1.6 && Math.random() < 0.7), stub: Math.random() < 0.3 };
+    },
+  });
+
+  // ---------- 台座牆與階梯看台 ----------
+  const POD_A = AR_A + 0.45, POD_B = AR_B + 0.45;
+  for (let c = 0; c < 72; c++) {                                  // 競技場邊的台座牆（缺幾塊）
+    if (Math.random() < 0.18) continue;
+    sMesh(sectorGeo(AR_A, AR_B, POD_A, POD_B, c / 72 * TAU, (c + 1) / 72 * TAU, rnd(1.0, 1.4)), pickTrav(), 0, 0, 0);
+  }
+  const IN_A = 21.5, IN_B = 17.85, STEPS = 7;
+  const dA = (IN_A - POD_A) / STEPS, dB = (IN_B - POD_B) / STEPS;
+  const CH = 36;
+  for (let k = 0; k < STEPS; k++) {
+    for (let c = 0; c < CH; c++) {
+      const tm = (c + 0.5) / CH * TAU, d = angDist(tm);
+      const p = d < 1.6 ? 0.82 - 0.04 * k : Math.max(0.06, 0.7 - 0.14 * k);   // 北側完整；南側越高越殘
+      if (Math.random() > p) continue;
+      sMesh(sectorGeo(POD_A + dA * k, POD_B + dB * k, POD_A + dA * (k + 1), POD_B + dB * (k + 1), c / CH * TAU, (c + 1) / CH * TAU, 1.5 + k * 0.52),
+        pickTrav(), 0, 0, 0);
+    }
+  }
+  // 放射狀磚牆：看台缺失處露出的支撐結構（只放南側）
+  for (let i = 0; i < 44; i += 1) {
+    const t = (i + 0.5) / 44 * TAU, d = angDist(t);
+    if (d < 1.5 || Math.random() < 0.25) continue;
+    const [xa, za] = pt(POD_A, POD_B, t), [xb, zb] = pt(IN_A, IN_B, t);
+    const len = Math.hypot(xb - xa, zb - za), h = rnd(0.7, 4.0);
+    const w = sBox(0.5, h, len, brickMat, (xa + xb) / 2, h / 2, (za + zb) / 2);
+    w.rotation.y = Math.atan2(xb - xa, zb - za);
+  }
+
+  // ---------- 殘留直立斷柱（位置與碰撞表 SHAME_COLUMN_OBSTACLES 對應，不可移動）----------
+  [[6.5, 4.5, 3.2], [-7.5, 2.8, 2.4], [-3.5, -8.5, 2.8], [8.2, -4.0, 1.8]].forEach(([x, z, h], idx) => {
+    const m = pickTrav();
+    sBox(1.3, 0.25, 1.3, m, x, 0.125, z);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.52, h - 0.25, 14), m);
+    shaft.position.set(x, 0.25 + (h - 0.25) / 2, z); shaft.castShadow = true; shaft.receiveShadow = true;
+    G.add(shaft);
+    for (let f = 0; f < 6; f++) {   // 凹槽（柱身直條紋）
+      const a = f / 6 * TAU;
+      const fl = new THREE.Mesh(new THREE.BoxGeometry(0.05, h - 0.9, 0.05), darkMat);
+      fl.position.set(x + Math.cos(a) * 0.5, 0.25 + (h - 0.25) / 2, z + Math.sin(a) * 0.5);
+      G.add(fl);
+    }
+    if (idx !== 3) {                // 柱頭（最矮那根只剩斷口）
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.46, 0.4, 14), m);
+      cap.position.set(x, h + 0.05, z); cap.castShadow = true; G.add(cap);
+      const ab = sBox(1.4, 0.18, 1.4, m, x, h + 0.34, z);
+      ab.rotation.y = rnd(0, 0.5);
+      if (idx === 1) { ab.rotation.z = 0.12; ab.position.y -= 0.05; }
+    }
+  });
+
+  // ---------- 倒落的柱身、塊石、碎磚 ----------
+  for (let i = 0; i < 9; i++) {
+    const a = Math.random() * TAU, r = 9 + Math.random() * 6;
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 1.4 + Math.random() * 1.2, 12), pickTrav());
+    drum.position.set(r * Math.sin(a), 0.42, r * Math.cos(a));
+    drum.rotation.z = Math.PI / 2 + rnd(-0.15, 0.15); drum.rotation.y = Math.random() * Math.PI;
+    drum.castShadow = true; drum.receiveShadow = true;
+    if (Math.abs(drum.position.z) < 3 && Math.abs(drum.position.x) < 11) { drum.position.z += 3.6 * (drum.position.z >= 0 ? 1 : -1); }   // 別掉進地下室
+    G.add(drum);
+  }
+  for (let i = 0; i < 280; i++) {   // 塌毀處（南側外環）與場內的塊石
+    const south = i < 170;
+    const t = south ? Math.PI + (Math.random() < 0.5 ? -1 : 1) * rnd(2.2, 3.0) : rnd(0, TAU);
+    const r = south ? rnd(0.92, 1.18) : rnd(0.55, 0.9);
+    const [bx, bz] = pt(south ? 27 * r : 21 * r, south ? 22.5 * r : 17 * r, t);
+    if (!south && Math.abs(bz) < 3.2 && Math.abs(bx) < 11) continue;
+    const blk = sBox(rnd(0.5, 1.5), rnd(0.4, 0.9), rnd(0.5, 1.2), pickTrav(), bx, 0.3, bz);
+    blk.rotation.set(rnd(-0.3, 0.3), rnd(0, 3), rnd(-0.3, 0.3));
+  }
+  for (let i = 0; i < 40; i++) {    // 碎磚
+    const a = Math.random() * TAU, r = rnd(4, 24);
+    const x = r * Math.sin(a) * 1.0, z = r * Math.cos(a) * 0.8;
+    if (Math.abs(z) < 3.2 && Math.abs(x) < 11) continue;
+    const ch = sMesh(new THREE.DodecahedronGeometry(rnd(0.15, 0.4), 0), Math.random() < 0.5 ? brickMat : pickTrav(), x, 0.15, z);
+    ch.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+  }
+
+  // ---------- 植被：乾草叢、灌木、傘松與柏樹（羅馬的天際線）----------
+  for (let i = 0; i < 260; i++) {
+    const a = Math.random() * TAU, r = Math.random() < 0.6 ? rnd(14, 22) : rnd(2, 13);
+    const x = r * Math.sin(a), z = r * Math.cos(a) * 0.82;
+    if (Math.abs(z) < 3.2 && Math.abs(x) < 11) continue;
+    const w = new THREE.Mesh(new THREE.ConeGeometry(rnd(0.06, 0.12), rnd(0.35, 0.9), 4), Math.random() < 0.6 ? dryMat : mossMat);
+    w.position.set(x, 0.25, z); w.rotation.set(rnd(-0.4, 0.4), 0, rnd(-0.4, 0.4));
+    G.add(w);
+  }
+  // 荒蕪：灌木叢爬滿場內與看台、場內長出野樹、牆根青苔、沙地龜裂汙漬
+  const bushMats = [mossMat, dryMat, new THREE.MeshStandardMaterial({ color: 0x5e6b3a, roughness: 1 })];
+  for (let i = 0; i < 70; i++) {
+    const a = Math.random() * TAU, r = Math.random() < 0.5 ? rnd(8, 17) : rnd(15, 22);
+    const x = r * Math.sin(a), z = r * Math.cos(a) * 0.82;
+    if (Math.abs(z) < 3.4 && Math.abs(x) < 11.5) continue;
+    const bsh = new THREE.Mesh(new THREE.IcosahedronGeometry(rnd(0.35, 0.95), 1), bushMats[Math.floor(Math.random() * 3)]);
+    bsh.position.set(x, rnd(0.2, 0.5), z); bsh.scale.set(1.2, rnd(0.5, 0.9), 1.2);
+    bsh.castShadow = true; G.add(bsh);
+  }
+  for (let i = 0; i < 5; i++) {   // 場內的野樹（從破裂的沙地長出來）
+    const a = Math.random() * TAU, r = rnd(9, 14);
+    const x = r * Math.sin(a), z = r * Math.cos(a) * 0.8;
+    if (Math.abs(z) < 4 && Math.abs(x) < 12) continue;
+    const th = rnd(2.5, 4.2);
+    const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.16, th, 6), new THREE.MeshStandardMaterial({ color: 0x5d4a38, roughness: 1 }));
+    tr.position.set(x, th / 2, z); tr.rotation.z = rnd(-0.2, 0.2); tr.castShadow = true; G.add(tr);
+    for (let k = 0; k < 2; k++) {
+      const lf = new THREE.Mesh(new THREE.IcosahedronGeometry(rnd(0.7, 1.1), 1), bushMats[k]);
+      lf.position.set(x + rnd(-0.4, 0.4), th + rnd(-0.2, 0.4), z + rnd(-0.4, 0.4)); lf.scale.y = 0.8; lf.castShadow = true; G.add(lf);
+    }
+  }
+  const stainMat = new THREE.MeshStandardMaterial({ color: 0x6b5a40, roughness: 1, transparent: true, opacity: 0.25, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  for (let i = 0; i < 26; i++) {   // 沙地龜裂與乾涸汙漬
+    const a = Math.random() * TAU, r = rnd(2, 15);
+    const x = r * Math.sin(a), z = r * Math.cos(a) * 0.8;
+    if (Math.abs(z) < 3.2 && Math.abs(x) < 11) continue;
+    const st = new THREE.Mesh(new THREE.CircleGeometry(rnd(0.8, 2.4), 9), stainMat);
+    st.rotation.set(-Math.PI / 2, 0, Math.random() * 3); st.scale.set(1, rnd(0.4, 0.8), 1); st.position.set(x, 0.015, z);
+    G.add(st);
+  }
+  for (let i = 0; i < 14; i++) {
+    const a = rnd(0, TAU), s = rnd(1.2, 1.55);
+    const [tx, tz] = pt(27 * s, 22.5 * s, a);
+    if (Math.random() < 0.5) {      // 傘松
+      const th = rnd(7, 10);
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.34, th, 7), new THREE.MeshStandardMaterial({ color: 0x6b5340, roughness: 1 }));
+      trunk.position.set(tx, th / 2, tz); trunk.rotation.z = rnd(-0.08, 0.08); trunk.castShadow = true; G.add(trunk);
+      for (let k = 0; k < 3; k++) {
+        const cn = new THREE.Mesh(new THREE.IcosahedronGeometry(rnd(1.8, 2.6), 1), new THREE.MeshStandardMaterial({ color: 0x55663d, roughness: 1 }));
+        cn.position.set(tx + rnd(-1.4, 1.4), th + rnd(-0.3, 0.7), tz + rnd(-1.4, 1.4)); cn.scale.set(1.4, 0.5, 1.4); cn.castShadow = true; G.add(cn);
+      }
+    } else {                        // 義大利柏樹
+      const ch = rnd(6, 9);
+      const cy = new THREE.Mesh(new THREE.ConeGeometry(1.0, ch, 8), new THREE.MeshStandardMaterial({ color: 0x3f5035, roughness: 1 }));
+      cy.position.set(tx, ch / 2, tz); cy.castShadow = true; G.add(cy);
+    }
+  }
+}
+
+// 舊版羅馬競技場環境（簡化圓形雙層拱廊，已不再使用，保留以便還原）
+function buildShameEnvironmentOld() {
   shameEnvGroup = new THREE.Group();
   shameEnvGroup.visible = false;
   scene.add(shameEnvGroup);
@@ -1123,7 +2784,665 @@ function buildShameEnvironment() {
    - 招牌的化技綠光：窗、燈、煙囪都滲綠
    - 維多利亞鐵格＋工業殘骸混搭（拱窗、鐵橋、簷板）
    ============================================================ */
+/* ============================================================
+   七大罪環境（優化版）：蒸氣龐克監獄街區
+   參考：維多利亞工業監獄（鐵欄窗、層層鐵製走廊、圍牆＋瞭望塔＋鐵絲網＋探照燈）、
+        髒舊的底層街區（煙燻磚牆、鵝卵石路、積水、海報塗鴉、晾衣線、破窗木板窗）、
+        蒸氣龐克損毀風（鉚釘鐵板、黃銅齒輪、鍋爐、壓力錶、閥門、管線漏蒸氣、時鐘塔）
+   保留：街心留空給七大罪生物、化技綠／琥珀燈光（sinsLamps 閃爍）、Shimmer 紫窗
+   ============================================================ */
 function buildSinsEnvironment() {
+  sinsEnvGroup = new THREE.Group();
+  sinsEnvGroup.visible = false;
+  scene.add(sinsEnvGroup);
+  sinsLamps = [];
+  const G = sinsEnvGroup;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  const TAU = Math.PI * 2;
+
+  const ZAUN = {
+    chemGreen: 0x39d353, chemGreenDim: 0x1a7a30, amber: 0xd4a017, shimmer: 0xa855f7, smoke: 0x8a9a8e,
+    brass: 0xa8843a, copper: 0x8a5a3a, iron: 0x3a4048, rust: 0x6b4a2a, soot: 0x1a1a18,
+  };
+
+  // ---------- 貼圖（皆以公尺為 UV 單位，tile = 2 m）----------
+  const mkTex = (draw, w, h, repU, repV) => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    draw(c.getContext('2d'), w, h);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(repU, repV == null ? repU : repV);
+    t.anisotropy = 4;
+    return t;
+  };
+  // 煙燻磚牆：深紅褐磚＋灰漿＋煤煙汙漬＋雨水垂痕＋底部潮濕
+  const brickTex = mkTex((g, w, h) => {
+    g.fillStyle = '#3a3029'; g.fillRect(0, 0, w, h);
+    const cols = ['#5e4234', '#5a3f32', '#634638', '#573c30', '#5c4033'];
+    for (let r = 0; r < 16; r++) {
+      const off = r % 2 ? 14 : 0;
+      for (let x = -off; x < w; x += 28) {
+        g.fillStyle = cols[Math.floor(Math.random() * cols.length)];
+        g.fillRect(x + 1, r * 16 + 1, 26, 14);
+      }
+    }
+    for (let i = 0; i < 40; i++) {      // 煤煙塊
+      g.fillStyle = 'rgba(8,8,6,' + (0.03 + Math.random() * 0.05) + ')';
+      g.fillRect(Math.random() * w, Math.random() * h, 20 + Math.random() * 50, 20 + Math.random() * 60);
+    }
+    for (let i = 0; i < 6; i++) {      // 垂直雨痕
+      g.fillStyle = 'rgba(0,0,0,0.07)';
+      g.fillRect(Math.random() * w, Math.random() * h * 0.5, 2 + Math.random() * 3, 40 + Math.random() * 120);
+    }
+    for (let i = 0; i < 200; i++) { g.fillStyle = 'rgba(0,0,0,0.05)'; g.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+  }, 256, 256, 0.35);
+  // 鉚釘鐵板：板縫＋鉚釘格＋鏽斑垂痕
+  const plateTex = mkTex((g, w, h) => {
+    g.fillStyle = '#3b3f3c'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 700; i++) { g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.12)'; g.fillRect(Math.random() * w, Math.random() * h, 2, 1); }
+    g.strokeStyle = 'rgba(8,8,8,0.8)'; g.lineWidth = 3;
+    g.strokeRect(0, 0, w, h); g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.moveTo(w / 2, 0); g.lineTo(w / 2, h); g.stroke();
+    for (let x = 14; x < w; x += 32) for (let y = 14; y < h; y += 32) {
+      g.fillStyle = '#6b6f69'; g.beginPath(); g.arc(x, y, 3, 0, TAU); g.fill();
+      g.fillStyle = 'rgba(0,0,0,0.5)'; g.beginPath(); g.arc(x + 1, y + 1, 1.5, 0, TAU); g.fill();
+    }
+    for (let i = 0; i < 18; i++) {      // 鏽水垂痕
+      g.fillStyle = 'rgba(150,80,30,' + (0.06 + Math.random() * 0.1) + ')';
+      g.fillRect(Math.random() * w, Math.random() * h * 0.6, 3 + Math.random() * 6, 30 + Math.random() * 120);
+    }
+  }, 256, 256, 0.5);
+  // 鵝卵石路面：不規則石塊＋積污＋青苔
+  const cobbleTex = mkTex((g, w, h) => {
+    g.fillStyle = '#242723'; g.fillRect(0, 0, w, h);
+    const cols = ['#33362f', '#31342d', '#363933', '#30332c', '#343730'];
+    for (let y = 0; y < h; y += 32) {
+      const off = (y / 32) % 2 ? 20 : 0;
+      for (let x = -off; x < w; x += 40) {
+        g.fillStyle = cols[Math.floor(Math.random() * cols.length)];
+        const rw = 30 + Math.random() * 6, rh = 24 + Math.random() * 5;
+        g.beginPath(); g.ellipse(x + 20, y + 16, rw / 2, rh / 2, 0, 0, TAU); g.fill();
+      }
+    }
+    for (let i = 0; i < 8; i++) { g.fillStyle = 'rgba(55,95,50,0.06)'; g.beginPath(); g.arc(Math.random() * w, Math.random() * h, 10 + Math.random() * 24, 0, TAU); g.fill(); }
+  }, 256, 256, 12, 12);
+  // 窗戶：鐵欄窗（牢房）／玻璃窗／破窗／木板窗，亮的版本用 emissiveMap 發光
+  const winCache = {};
+  const winMat = (kind) => {
+    if (winCache[kind]) return winCache[kind];
+    const lit = kind === 'barLit' || kind === 'glassLit' || kind === 'glassGreen';
+    const t = mkTex((g, w, h) => {
+      g.fillStyle = '#2a2825'; g.fillRect(0, 0, w, h);
+      const gr = g.createLinearGradient(0, 8, 0, h - 8);
+      if (kind === 'barLit') { gr.addColorStop(0, '#ffd27a'); gr.addColorStop(1, '#b8741f'); }
+      else if (kind === 'glassLit') { gr.addColorStop(0, '#ffcf6a'); gr.addColorStop(1, '#9a5f1a'); }
+      else if (kind === 'glassGreen') { gr.addColorStop(0, '#8dff9a'); gr.addColorStop(1, '#1e7a35'); }
+      else { gr.addColorStop(0, '#12171a'); gr.addColorStop(1, '#070909'); }
+      g.fillStyle = gr; g.fillRect(8, 8, w - 16, h - 16);
+      if (kind === 'barLit' || kind === 'barDark') {
+        g.fillStyle = '#121211';
+        for (let x = 16; x < w - 8; x += 12) g.fillRect(x, 8, 4, h - 16);
+        g.fillRect(8, h * 0.45, w - 16, 5);
+      } else if (kind === 'broken') {
+        g.fillStyle = '#4b5a58';
+        for (let i = 0; i < 5; i++) { g.beginPath(); const x = 10 + Math.random() * (w - 20), y = 10 + Math.random() * (h - 20); g.moveTo(x, y); g.lineTo(x + 10 + Math.random() * 14, y + 4); g.lineTo(x + 4, y + 14 + Math.random() * 16); g.fill(); }
+      } else if (kind === 'boarded') {
+        g.fillStyle = '#4a3a28';
+        g.save(); g.translate(w / 2, h / 2); g.rotate(0.35); g.fillRect(-w, -8, w * 2, 14); g.rotate(-0.7); g.fillRect(-w, -4, w * 2, 14); g.restore();
+        g.fillStyle = '#6b5538'; g.fillRect(10, h * 0.2, w - 20, 12);
+      } else {
+        g.fillStyle = '#25231f'; g.fillRect(w / 2 - 2, 8, 4, h - 16); g.fillRect(8, h * 0.42, w - 16, 4);
+      }
+    }, 64, 96, 1);
+    const m = new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 });
+    if (lit) { m.emissive = new THREE.Color(0xffffff); m.emissiveMap = t; m.emissiveIntensity = 0.28; }
+    winCache[kind] = m;
+    return m;
+  };
+  // 招牌、海報、時鐘、壓力錶
+  const textCache = {};
+  const signMat = (text, bg, fg) => {
+    const key = text + bg + fg;
+    if (textCache[key]) return textCache[key];
+    const t = mkTex((g, w, h) => {
+      g.fillStyle = bg; g.fillRect(0, 0, w, h);
+      for (let i = 0; i < 200; i++) { g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(Math.random() * w, Math.random() * h, 3, 2); }
+      g.strokeStyle = fg; g.lineWidth = 4; g.strokeRect(6, 6, w - 12, h - 12);
+      g.fillStyle = fg; g.font = 'bold 34px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, w / 2, h / 2 + 2);
+      g.fillStyle = 'rgba(120,70,30,0.35)'; g.fillRect(w * 0.7, 0, 10, h);   // 鏽水
+    }, 256, 96, 1);
+    const m = new THREE.MeshStandardMaterial({ map: t, roughness: 0.7, metalness: 0.3 });
+    textCache[key] = m;
+    return m;
+  };
+  const clockMat = (() => {
+    const t = mkTex((g, w, h) => {
+      g.fillStyle = '#d8cfae'; g.beginPath(); g.arc(128, 128, 120, 0, TAU); g.fill();
+      g.strokeStyle = '#2a2520'; g.lineWidth = 8; g.stroke();
+      for (let k = 0; k < 12; k++) { const a = k / 12 * TAU; g.lineWidth = 6; g.beginPath(); g.moveTo(128 + Math.sin(a) * 96, 128 - Math.cos(a) * 96); g.lineTo(128 + Math.sin(a) * 112, 128 - Math.cos(a) * 112); g.stroke(); }
+      g.lineWidth = 9; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(128, 128); g.lineTo(128 + Math.sin(2.1) * 62, 128 - Math.cos(2.1) * 62); g.stroke();   // 停擺的指針
+      g.beginPath(); g.moveTo(128, 128); g.lineTo(128 + Math.sin(5.2) * 90, 128 - Math.cos(5.2) * 90); g.stroke();
+      g.fillStyle = 'rgba(70,50,30,0.35)'; g.fillRect(0, 150, 256, 106);
+    }, 256, 256, 1);
+    return new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 });
+  })();
+  const gaugeMat = (() => {
+    const t = mkTex((g, w, h) => {
+      g.fillStyle = '#d9d2b6'; g.beginPath(); g.arc(64, 64, 58, 0, TAU); g.fill();
+      g.fillStyle = '#b3402f'; g.beginPath(); g.arc(64, 64, 52, -0.3, 0.9); g.lineTo(64, 64); g.fill();     // 危險區
+      g.fillStyle = '#d9d2b6'; g.beginPath(); g.arc(64, 64, 40, 0, TAU); g.fill();
+      g.strokeStyle = '#222'; g.lineWidth = 4; g.beginPath(); g.moveTo(64, 64); g.lineTo(64 + 30, 64 - 22); g.stroke();
+    }, 128, 128, 1);
+    return new THREE.MeshStandardMaterial({ map: t, roughness: 0.4 });
+  })();
+  const railTex = mkTex((g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = '#2a2d2a'; g.fillRect(0, 4, w, 5); g.fillRect(0, h / 2, w, 3);
+    for (let x = 4; x < w; x += 12) g.fillRect(x, 4, 3, h - 4);
+  }, 128, 32, 1);
+  const chainTex = mkTex((g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = '#5a5e5a'; g.lineWidth = 2;
+    for (let i = -h; i < w + h; i += 12) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + h, h); g.moveTo(i + h, 0); g.lineTo(i, h); g.stroke(); }
+  }, 64, 64, 1);
+
+  // ---------- 材質 ----------
+  const wallMats = [0x9c968e, 0x8f8982, 0x837e77].map(c => new THREE.MeshStandardMaterial({ map: brickTex, color: c, roughness: 1 }));
+  const plateMat = new THREE.MeshStandardMaterial({ map: plateTex, color: 0xffffff, roughness: 0.6, metalness: 0.5 });
+  const plateRustMat = new THREE.MeshStandardMaterial({ map: plateTex, color: 0x8a6a56, roughness: 0.8, metalness: 0.35 });
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x4a4a44, roughness: 1 });
+  const ironMat = new THREE.MeshStandardMaterial({ color: ZAUN.iron, roughness: 0.55, metalness: 0.75 });
+  const rustMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.8, metalness: 0.4 });
+  const brassMat = new THREE.MeshStandardMaterial({ color: 0x7a6430, roughness: 0.4, metalness: 0.8 });
+  const copperMat = new THREE.MeshStandardMaterial({ color: 0x6a4a34, roughness: 0.5, metalness: 0.7 });
+  const verdiMat = new THREE.MeshStandardMaterial({ color: 0x3a5a4e, roughness: 0.7, metalness: 0.4 });   // 銅綠
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x0a0c0b, roughness: 1, side: THREE.DoubleSide });
+  const chemGlowMat = new THREE.MeshStandardMaterial({ color: ZAUN.chemGreenDim, emissive: ZAUN.chemGreen, emissiveIntensity: 0.55, roughness: 0.4 });
+  const amberGlowMat = new THREE.MeshStandardMaterial({ color: 0x6a5018, emissive: ZAUN.amber, emissiveIntensity: 0.5, roughness: 0.5 });
+  const shimmerGlowMat = new THREE.MeshStandardMaterial({ color: 0x4a2080, emissive: ZAUN.shimmer, emissiveIntensity: 1.1, roughness: 0.4 });
+  const steamMat = new THREE.MeshBasicMaterial({ color: 0xaab5a8, transparent: true, opacity: 0.16, depthWrite: false });
+
+  // ---------- 小工具 ----------
+  const uvBox = (w, h, d) => {
+    const g = new THREE.BoxGeometry(w, h, d);
+    const uv = g.attributes.uv;
+    const dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+    for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const i = f * 4 + v; uv.setXY(i, uv.getX(i) * dims[f][0], uv.getY(i) * dims[f][1]); }
+    return g;
+  };
+  const put = (geo, mat, x, y, z, parent, shadow) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    if (shadow !== false) { m.castShadow = true; m.receiveShadow = true; }
+    (parent || G).add(m);
+    return m;
+  };
+  const bx = (w, h, d, mat, x, y, z, parent) => put(uvBox(w, h, d), mat, x, y, z, parent);
+  const cyl = (r1, r2, h, mat, x, y, z, parent, seg) => put(new THREE.CylinderGeometry(r1, r2, h, seg || 10), mat, x, y, z, parent);
+  const steam = (x, y, z, s, parent) => {   // 漏出的蒸氣：幾顆半透明球疊成一團
+    const g = new THREE.Group(); g.position.set(x, y, z);
+    for (let i = 0; i < 4; i++) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(s * rnd(0.5, 1), 8, 6), steamMat);
+      m.position.set(rnd(-s, s) * 0.5, i * s * 0.7, rnd(-s, s) * 0.5);
+      g.add(m);
+    }
+    (parent || G).add(g);
+  };
+  const gearGeo = (R, teeth, thick) => {
+    const sh = new THREE.Shape();
+    const wdt = TAU / teeth;
+    for (let j = 0; j < teeth; j++) {
+      const a0 = j * wdt;
+      [[R * 0.84, 0], [R, 0.14], [R, 0.5], [R * 0.84, 0.64]].forEach(([r, f], k) => {
+        const a = a0 + f * wdt;
+        (j === 0 && k === 0) ? sh.moveTo(Math.cos(a) * r, Math.sin(a) * r) : sh.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      });
+    }
+    const hole = new THREE.Path(); hole.absarc(0, 0, R * 0.28, 0, TAU, true); sh.holes.push(hole);
+    for (let k = 0; k < 4; k++) {   // 輪輻：以洞口外的小洞鏤空
+      const p = new THREE.Path(); const a = k / 4 * TAU + 0.4;
+      p.absarc(Math.cos(a) * R * 0.55, Math.sin(a) * R * 0.55, R * 0.16, 0, TAU, true); sh.holes.push(p);
+    }
+    return new THREE.ExtrudeGeometry(sh, { depth: thick, bevelEnabled: false, curveSegments: 6 });
+  };
+
+  // ---------- 地面：濕鵝卵石路＋排水格柵＋人孔蓋＋裂痕＋綠色積水 ----------
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.MeshStandardMaterial({ color: 0x3a392f, roughness: 0.62 }));
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+  G.add(ground);
+  const crackMat = new THREE.MeshStandardMaterial({ color: 0x151815, roughness: 1 });
+  for (let i = 0; i < 12; i++) {
+    const c = put(new THREE.BoxGeometry(0.06 + Math.random() * 0.05, 0.01, 1 + Math.random() * 3.2), crackMat, rnd(-22, 22), 0.02, rnd(-20, 20), G, false);
+    c.rotation.y = Math.random() * Math.PI;
+  }
+  const puddleMat = new THREE.MeshStandardMaterial({ color: 0x0a2a14, roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.8, depthWrite: false });
+  for (let i = 0; i < 5; i++) {
+    const p = put(new THREE.CircleGeometry(0.5 + Math.random() * 1.1, 10), puddleMat, rnd(-13, 13), 0.015, rnd(-12, 14), G, false);
+    p.rotation.x = -Math.PI / 2;
+  }
+  // 自然廢墟地面：素色泥土＋大塊碎裂的舊鋪面＋泥濘／青苔斑＋雜草叢（不貼圖，避免花）
+  const slabMat = new THREE.MeshStandardMaterial({ color: 0x4a4a42, roughness: 1 });
+  const dirtMats = [0x302e26, 0x45422f, 0x34372a].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1, transparent: true, opacity: 0.8, depthWrite: false }));
+  for (let i = 0; i < 16; i++) {          // 泥濘／苔蘚大斑塊（貼地的壓扁圓盤）
+    const p = put(new THREE.CircleGeometry(rnd(1.5, 4.2), 12), dirtMats[i % 3], rnd(-14, 14), 0.012 + i * 0.0004, rnd(-14, 16), G, false);
+    p.rotation.set(-Math.PI / 2, 0, rnd(0, 3)); p.scale.set(1, rnd(0.5, 0.9), 1);
+  }
+  for (let i = 0; i < 24; i++) {          // 碎裂翹起的舊鋪面石板
+    const sx = rnd(-12, 12), sz = rnd(-12, 15);
+    if (Math.hypot(sx, sz) < 6) continue;
+    const sl = put(new THREE.BoxGeometry(rnd(0.8, 2.2), rnd(0.08, 0.2), rnd(0.8, 1.8)), slabMat, sx, 0.05, sz, G);
+    sl.rotation.set(rnd(-0.12, 0.12), rnd(0, 3), rnd(-0.12, 0.12));
+  }
+  const weedMats = [0x3a4630, 0x44503a, 0x4f4e38, 0x30392a].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }));
+  for (let i = 0; i < 150; i++) {         // 雜草叢（長在石板縫與牆根）
+    const wx = rnd(-14, 14), wz = rnd(-15, 17);
+    if (Math.hypot(wx, wz) < 5) continue;
+    const w = put(new THREE.ConeGeometry(rnd(0.05, 0.1), rnd(0.35, 0.9), 4), weedMats[i % 4], wx, 0.2, wz, G, false);
+    w.rotation.set(rnd(-0.4, 0.4), 0, rnd(-0.4, 0.4));
+  }
+  for (let i = 0; i < 18; i++) {          // 較大的灌木與蔓生團塊，主要靠牆邊
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const b = put(new THREE.IcosahedronGeometry(rnd(0.4, 0.9), 1), weedMats[i % 4], side * rnd(7.2, 8.3), rnd(0.2, 0.4), rnd(-18, 17), G, false);
+    b.scale.set(1.1, rnd(0.5, 0.9), 1.1);
+  }
+  const grateMat = new THREE.MeshStandardMaterial({ color: 0x151716, roughness: 0.6, metalness: 0.6 });
+  [[-4, 6], [5, -3], [-2, -9], [3, 12]].forEach(([gx, gz]) => {      // 排水格柵
+    bx(1.1, 0.04, 0.7, grateMat, gx, 0.03, gz);
+    for (let k = -2; k <= 2; k++) bx(0.03, 0.05, 0.7, ironMat, gx + k * 0.2, 0.05, gz);
+  });
+  [[0, 2], [-5, -6]].forEach(([mx, mz]) => {                        // 人孔蓋＋漏出的蒸氣
+    cyl(0.55, 0.55, 0.06, plateMat, mx, 0.04, mz, G, 16);
+    steam(mx, 0.3, mz, 0.5);
+  });
+
+  // ---------- 街區建築：牢房棟（鐵欄窗＋鐵走廊）／出租屋／工廠（鍋爐） ----------
+  const signTexts = [['CELL BLOCK C', '#2d3a30', '#d6c98a'], ['WARDEN', '#3a2a24', '#d8b078'], ['BOILER WORKS', '#2a2f33', '#c98a4a'], ['RATIONS', '#33302a', '#d4cfa0'], ['NO ENTRY', '#4a2424', '#e0d8c0'], ['SECTOR 7', '#26302e', '#9ad0a8']];
+  const grafColors = [0x8a2a3a, 0x2a6a4a, 0x6a4a8a, 0xa06a20];
+
+  function addBuilding(cx, cz, fw, bd, h, rotY, style) {
+    const grp = new THREE.Group();
+    grp.position.set(cx, 0, cz);
+    grp.rotation.y = rotY;
+    G.add(grp);
+    const wm = pick(wallMats);
+    const fz = bd / 2;
+    const vineMat = weedMats[1], vineDark = weedMats[3];
+    // 主體分成三段柱體，高度參差＝上部大面積坍塌，頂端斷口鋸齒狀
+    const NC = 3, cw = fw / NC, colH = [];
+    for (let k = 0; k < NC; k++) colH.push(h * rnd(0.42, 0.95));
+    colH[Math.floor(Math.random() * NC)] = h;
+    for (let k = 0; k < NC; k++) {
+      const ch = colH[k], ox = (k - (NC - 1) / 2) * cw;
+      bx(cw, ch, bd, wm, ox, ch / 2, 0, grp);
+      bx(cw + 0.05, 1.0, bd + 0.2, stoneMat, ox, 0.5, 0, grp);               // 石基座
+      if (ch >= h * 0.97) bx(cw + 0.3, 0.4, bd + 0.5, stoneMat, ox, ch + 0.2, 0, grp).rotation.z = rnd(-0.03, 0.03);   // 殘存的簷口
+      else {
+        for (let j = 0; j < 3; j++) {                                          // 斷口：鋸齒殘磚
+          const jh = rnd(0.3, 1.5), jw = cw * rnd(0.15, 0.4);
+          bx(jw, jh, bd * rnd(0.4, 0.95), wm, ox + rnd(-cw / 2 + jw / 2, cw / 2 - jw / 2), ch + jh / 2 - 0.05, rnd(-0.3, 0.3), grp).rotation.z = rnd(-0.2, 0.2);
+        }
+        const fl = Math.max(2.7, Math.floor(ch / 2.7) * 2.7);                  // 樓板外露、垂掛下來
+        const slab = bx(cw * 0.95, 0.16, bd * 0.8, plateRustMat, ox, fl - 0.1, fz * 0.2, grp);
+        slab.rotation.x = rnd(0.05, 0.35); slab.position.z += rnd(0.1, 0.6);
+        for (let j = 0; j < 3; j++) cyl(0.025, 0.025, rnd(0.8, 2.2), rustMat, ox + rnd(-cw / 2, cw / 2), ch + rnd(0.2, 0.9), rnd(-bd / 3, bd / 3), grp, 4).rotation.z = rnd(-0.3, 0.3);   // 外露鋼筋
+      }
+      // 窗戶：只放在還存在的牆段；大多破損或釘死，極少數仍亮燈
+      const nC = Math.max(1, Math.floor(cw / 2.0));
+      const deadKinds = style === 'cell' ? ['barDark', 'barDark', 'broken'] : ['glassDark', 'broken', 'broken', 'boarded', 'boarded'];
+      for (let r = 0; 2.3 + r * 2.7 < ch - 1.2; r++) {
+        for (let c = 0; c < nC; c++) {
+          if (Math.random() < 0.18) continue;                                  // 整扇窗連牆一起掉了
+          const wx = ox + (c - (nC - 1) / 2) * (cw / nC);
+          put(new THREE.PlaneGeometry(1.1, 1.6), winMat(Math.random() < 0.06 ? (style === 'cell' ? 'barLit' : 'glassLit') : pick(deadKinds)), wx, 2.3 + r * 2.7, fz + 0.03, grp, false);
+          bx(1.4, 0.12, 0.3, stoneMat, wx, 2.3 + r * 2.7 - 0.9, fz + 0.1, grp).rotation.z = rnd(-0.1, 0.1);
+        }
+      }
+      // 鐵走廊：段落殘缺、傾斜垂掛
+      if (style === 'cell') {
+        for (let r = 0; 1.4 + r * 2.7 < ch - 2; r++) {
+          if (Math.random() < 0.3) continue;
+          const y = 1.45 + r * 2.7;
+          const deck = bx(cw, 0.12, 1.0, plateRustMat, ox, y, fz + 0.5, grp);
+          const rail = put(new THREE.PlaneGeometry(cw, 1.0), new THREE.MeshBasicMaterial({ map: railTex.clone(), transparent: true, alphaTest: 0.5, side: THREE.DoubleSide, color: 0x9a8a7a }), ox, y + 0.55, fz + 1.0, grp, false);
+          rail.material.map.needsUpdate = true; rail.material.map.repeat.set(cw / 4, 1);
+          if (Math.random() < 0.45) { const t = rnd(0.12, 0.4) * (Math.random() < 0.5 ? 1 : -1); deck.rotation.z = t; deck.position.y -= Math.abs(t) * cw * 0.25; rail.rotation.z = t; rail.position.y -= Math.abs(t) * cw * 0.25; }
+        }
+      }
+    }
+    // 門：只剩黑洞洞的門口，鐵門半開歪掛
+    const dxo = rnd(-fw / 4, fw / 4);
+    bx(1.5, 2.4, 0.2, darkMat, dxo, 1.2 + 0.5, fz + 0.08, grp);
+    if (Math.random() < 0.6) {
+      const hinge = new THREE.Group(); hinge.position.set(dxo - 0.75, 1.7, fz + 0.2); hinge.rotation.y = -rnd(0.7, 1.4);
+      const dm = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.3, 0.1), style === 'cell' ? plateRustMat : rustMat); dm.position.x = 0.75; dm.castShadow = true; hinge.add(dm); grp.add(hinge);
+    }
+    // 外牆管線：斷裂、短缺，管箍留幾個
+    [-1, 1].forEach(s => {
+      const px = s * (fw / 2 - 0.35), ph = (h + 1) * rnd(0.35, 1.0);
+      cyl(0.12, 0.12, ph, Math.random() < 0.5 ? rustMat : verdiMat, px, ph / 2, fz + 0.2, grp, 7);
+      for (let y = 1.8; y < ph; y += 3) { const col = put(new THREE.TorusGeometry(0.17, 0.035, 5, 10), ironMat, px, y, fz + 0.2, grp); col.rotation.x = Math.PI / 2; }
+      if (Math.random() < 0.5) steam(px, ph + 0.1, fz + 0.2, 0.3, grp);
+    });
+    // 牆面大破洞與裂縫、塗鴉
+    for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) {
+      const pts = [], n = 9, sz = rnd(0.8, 1.9);
+      for (let k = 0; k < n; k++) { const a = k / n * TAU, rr = sz * rnd(0.5, 1.1); pts.push(new THREE.Vector2(Math.cos(a) * rr * 1.1, Math.sin(a) * rr * 0.9)); }
+      put(new THREE.ShapeGeometry(new THREE.Shape(pts)), darkMat, rnd(-fw / 2 + 1.2, fw / 2 - 1.2), rnd(2.0, Math.max(2.5, h * 0.6)), fz + 0.07 + i * 0.003, grp, false);
+    }
+    for (let i = 0; i < 4; i++) {            // 斜向龜裂
+      const cr = put(new THREE.BoxGeometry(rnd(1.2, 3.0), 0.05, 0.02), darkMat, rnd(-fw / 2 + 1, fw / 2 - 1), rnd(1.5, h - 1), fz + 0.06, grp, false);
+      cr.rotation.z = rnd(-1.2, 1.2);
+    }
+    if (Math.random() < 0.6) {
+      const gr = put(new THREE.PlaneGeometry(rnd(0.8, 1.8), rnd(0.6, 1.2)), new THREE.MeshStandardMaterial({ color: pick(grafColors), roughness: 0.9, transparent: true, opacity: 0.7 }), rnd(-fw / 2 + 1, fw / 2 - 1), rnd(1.2, 2.2), fz + 0.06, grp, false);
+      gr.rotation.z = rnd(-0.2, 0.2);
+    }
+    // 招牌：半脫落、傾斜
+    if (Math.random() < 0.6) {
+      const [txt, bg, fg] = pick(signTexts);
+      const sg = new THREE.Group(); sg.position.set(rnd(-fw / 3, fw / 3), Math.min(4.8, colH[1] - 1), fz + 0.9); sg.rotation.z = rnd(-0.7, 0.7);
+      put(new THREE.PlaneGeometry(2.4, 0.9), signMat(txt, bg, fg), 0, 0, 0, sg, false).material.side = THREE.DoubleSide;
+      cyl(0.02, 0.02, 1.0, ironMat, 1.0, 0.8, 0, sg, 4);
+      grp.add(sg);
+    }
+    // 屋頂：水塔歪倒、煙囪斷半
+    if (Math.random() < 0.45) {
+      const tg = new THREE.Group(); tg.position.set(rnd(-fw / 4, fw / 4), colH[1] + 0.4, rnd(-bd / 4, bd / 4)); tg.rotation.z = rnd(-0.35, 0.35); tg.rotation.x = rnd(-0.2, 0.2);
+      cyl(1.0, 1.0, 1.7, plateRustMat, 0, 1.45, 0, tg, 14);
+      cyl(0.01, 1.15, 0.6, rustMat, 0, 2.6, 0, tg, 14);
+      [[-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7], [0.7, 0.7]].forEach(([lx, lz]) => bx(0.1, Math.random() < 0.5 ? 1.2 : 0.6, 0.1, ironMat, lx, 0.6, lz, tg));
+      grp.add(tg);
+    }
+    for (let i = 0; i < 1 + Math.floor(Math.random() * 2); i++) {
+      const k = Math.floor(Math.random() * NC), ox = (k - (NC - 1) / 2) * cw, sh = rnd(1.0, 2.4);
+      bx(0.8, sh, 0.8, wm, ox + rnd(-cw / 4, cw / 4), colH[k] + sh / 2, rnd(-bd / 3, bd / 3), grp).rotation.z = rnd(-0.15, 0.15);
+    }
+    // 荒蕪：藤蔓團塊爬滿外牆、垂掛藤條、屋頂與斷口長草、牆根灌木
+    for (let i = 0; i < 18; i++) {
+      const k = Math.floor(Math.random() * NC), ox = (k - (NC - 1) / 2) * cw;
+      const v = put(new THREE.IcosahedronGeometry(rnd(0.25, 0.6), 0), Math.random() < 0.5 ? vineMat : vineDark, ox + rnd(-cw / 2, cw / 2), rnd(0.6, colH[k]), fz + 0.12, grp, false);
+      v.scale.set(rnd(0.9, 1.8), rnd(0.9, 2.4), 0.45);
+    }
+    for (let i = 0; i < 6; i++) {
+      const k = Math.floor(Math.random() * NC), ox = (k - (NC - 1) / 2) * cw, vl = rnd(1.5, 4.0);
+      bx(rnd(0.08, 0.2), vl, 0.05, vineDark, ox + rnd(-cw / 2, cw / 2), colH[k] - vl / 2, fz + 0.1, grp);
+    }
+    for (let k = 0; k < NC; k++) {
+      const ox = (k - (NC - 1) / 2) * cw;
+      for (let j = 0; j < 3; j++) {
+        const m = put(new THREE.IcosahedronGeometry(rnd(0.3, 0.7), 0), Math.random() < 0.5 ? vineMat : weedMats[0], ox + rnd(-cw / 2, cw / 2), colH[k] + rnd(0.05, 0.5), rnd(-bd / 3, bd / 3), grp, false);
+        m.scale.set(1.4, 0.5, 1.2);
+      }
+    }
+    for (let i = 0; i < 5; i++) {
+      const bsh = put(new THREE.IcosahedronGeometry(rnd(0.5, 1.0), 1), pick(weedMats), rnd(-fw / 2, fw / 2), rnd(0.25, 0.5), fz + rnd(0.5, 1.6), grp, false);
+      bsh.scale.set(1.2, rnd(0.5, 0.9), 1.2);
+    }
+    // 牆腳瓦礫堆：磚塊、碎牆塊、斷梁
+    for (let i = 0; i < 12; i++) {
+      const rb = put(new THREE.DodecahedronGeometry(rnd(0.2, 0.55), 0), pick(wallMats), rnd(-fw / 2, fw / 2), 0.2, fz + rnd(0.4, 2.2), grp);
+      rb.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    }
+    for (let i = 0; i < 4; i++) {
+      const bm = bx(rnd(1.2, 2.6), 0.14, 0.16, rustMat, rnd(-fw / 2, fw / 2), 0.2, fz + rnd(0.5, 2.0), grp);
+      bm.rotation.set(rnd(-0.2, 0.2), rnd(0, 3), rnd(-0.2, 0.2));
+    }
+    addContactShadow(grp, 0, fz + 0.8, fw + 2.5, 3.4, 0.55);
+    return { grp, fw, bd, h, fz };
+  }
+
+  // 街道兩側：留 |x|<8.8 給生物活動
+  [-1, 1].forEach(s => {
+    [-18, -11.6, -5.2, 1.2, 7.6, 14].forEach((z, i) => {
+      const bd = rnd(5.2, 7), h = rnd(8, 15.5) + (Math.abs(z) < 3 ? 0 : 1.5);
+      const style = (i + (s > 0 ? 1 : 0)) % 3 === 0 ? 'factory' : (i + (s > 0 ? 0 : 1)) % 2 === 0 ? 'cell' : 'tenement';
+      const b = addBuilding(s * (8.8 + bd / 2), z, 6.2, bd, h, s < 0 ? Math.PI / 2 : -Math.PI / 2, style);
+      if (style === 'factory') {   // 鍋爐：橫躺的鉚釘圓筒＋壓力錶＋閥門＋蒸氣
+        const g = b.grp;
+        const tank = cyl(1.0, 1.0, 5.4, plateRustMat, 0, 1.25, b.fz + 1.3, g, 18);
+        tank.rotation.z = Math.PI / 2;
+        [-2, 0, 2].forEach(tx => { const ring = put(new THREE.TorusGeometry(1.03, 0.07, 6, 18), brassMat, tx, 1.25, b.fz + 1.3, g); ring.rotation.y = Math.PI / 2; });
+        const gauge = put(new THREE.CircleGeometry(0.28, 14), gaugeMat, 1.2, 1.9, b.fz + 2.31, g, false);
+        put(new THREE.TorusGeometry(0.3, 0.05, 5, 14), brassMat, 1.2, 1.9, b.fz + 2.31, g);
+        const valve = put(new THREE.TorusGeometry(0.28, 0.04, 5, 12), copperMat, -1.2, 2.45, b.fz + 1.3, g); valve.rotation.x = Math.PI / 2;
+        steam(-1.2, 2.6, b.fz + 1.3, 0.35, g);
+        cyl(0.18, 0.18, 1.0, copperMat, -1.2, 2.2, b.fz + 1.3, g, 8);
+      }
+    });
+  });
+
+  // ---------- 外圍與遠景：監獄圍牆（鐵門＋瞭望塔＋鐵絲網＋探照燈）、天際線、煙囪 ----------
+  const WZ = -24;   // 圍牆所在 z
+  // 圍牆：左右兩段實牆，中間留拱門
+  [-1, 1].forEach(s => {
+    bx(30, 10, 1.8, wallMats[0], s * 19, 5, WZ);
+    bx(30.4, 0.5, 2.2, stoneMat, s * 19, 10.25, WZ);
+    for (let k = 0; k < 6; k++) bx(0.25, 10, 2.0, plateMat, s * (5 + k * 5.4), 5, WZ + 0.05);   // 鐵扶壁
+  });
+  bx(8, 3.2, 1.8, wallMats[0], 0, 8.4, WZ);                          // 門楣
+  bx(8.4, 0.5, 2.2, stoneMat, 0, 10.25, WZ);
+  const gateGlow = put(new THREE.PlaneGeometry(6, 6.8), amberGlowMat, 0, 3.4, WZ - 0.4, G, false);
+  for (let k = -5; k <= 5; k++) cyl(0.07, 0.07, 6.8, ironMat, k * 0.55, 3.4, WZ + 0.4, G, 6);   // 鐵閘柵欄
+  [2.0, 4.4, 6.4].forEach(y => bx(6.2, 0.14, 0.2, ironMat, 0, y, WZ + 0.45));
+  for (let k = -5; k <= 5; k++) cyl(0.0, 0.1, 0.35, ironMat, k * 0.55, 6.9, WZ + 0.4, G, 4);   // 矛尖
+  put(new THREE.PlaneGeometry(5.0, 1.6), signMat('NO RETURN', '#2a2420', '#c9a860'), 0, 8.7, WZ + 1.0, G, false);
+  const gateLight = new THREE.PointLight(0xffb347, 0.9, 20, 2);
+  gateLight.position.set(0, 3.5, WZ + 2);
+  G.add(gateLight);
+  sinsLamps.push({ light: gateLight, bulbMat: amberGlowMat, base: 0.9 });
+  // 瞭望塔：門兩側圓塔＋角落木樁塔，頂有探照燈光錐
+  const cone = (x, y, z, len, rotX, rotZ, col) => {
+    const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.set(rotX, 0, rotZ);
+    const m = new THREE.Mesh(new THREE.ConeGeometry(len * 0.32, len, 18, 1, true),
+      new THREE.MeshBasicMaterial({ color: col || 0xffe9a8, transparent: true, opacity: 0.07, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+    m.position.y = -len / 2;
+    g.add(m); G.add(g);
+  };
+  [-1, 1].forEach(s => {
+    cyl(2.0, 2.3, 13, wallMats[0], s * 7.4, 6.5, WZ + 0.3, G, 14);
+    cyl(2.6, 2.6, 0.5, stoneMat, s * 7.4, 13.2, WZ + 0.3, G, 14);
+    cyl(0.01, 2.8, 2.2, copperMat, s * 7.4, 14.6, WZ + 0.3, G, 14);
+    for (let k = 0; k < 3; k++) put(new THREE.PlaneGeometry(0.7, 1.1), winMat(k === 1 ? 'barLit' : 'barDark'), s * 7.4 + Math.sin(k - 1) * 0.0, 5 + k * 2.6, WZ + 2.5, G, false);
+    cone(s * 7.4, 13.4, WZ + 1.5, 20, 0.9, s * 0.35, 0xffe9a8);
+  });
+  [-1, 1].forEach(s => {                                             // 角落木製瞭望塔
+    const tx = s * 27, tz = WZ + 4;
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => { const leg = bx(0.3, 10, 0.3, rustMat, tx + a * 1.4, 5, tz + b * 1.4); leg.rotation.z = -a * 0.04; });
+    bx(3.6, 0.3, 3.6, plateMat, tx, 9.8, tz);
+    bx(3.2, 1.8, 3.2, wallMats[1], tx, 10.95, tz);
+    put(new THREE.PlaneGeometry(2.0, 0.7), winMat('barLit'), tx, 11.0, tz + 1.62, G, false);
+    bx(4.0, 0.25, 4.0, ironMat, tx, 12.0, tz);
+    cone(tx, 11.8, tz + 1.8, 22, 0.7, -s * 0.5, 0xfff0c0);
+  });
+  // 倒刺鐵絲網：沿圍牆頂的螺旋
+  const wireMat = new THREE.MeshStandardMaterial({ color: 0x23221f, roughness: 0.6, metalness: 0.7 });
+  [[-34, -10], [10, 34]].forEach(([x0, x1]) => {
+    const pts = [];
+    for (let t = 0; t <= 1; t += 1 / 140) pts.push(new THREE.Vector3(x0 + (x1 - x0) * t, 10.9 + Math.sin(t * 90) * 0.35, WZ + Math.cos(t * 90) * 0.35));
+    put(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 200, 0.04, 4), wireMat, 0, 0, 0, G, false);
+  });
+  // 內側鐵柵欄＋鏈條網：守衛區與街道的分隔線（z=-17，留中間通道）
+  [-1, 1].forEach(s => {
+    const fx = s * 15.5, fl = 21;
+    for (let k = 0; k < 14; k++) { cyl(0.05, 0.05, 2.4, ironMat, s * (5 + k * 1.5), 1.2, -17, G, 5); cyl(0.0, 0.08, 0.25, ironMat, s * (5 + k * 1.5), 2.5, -17, G, 4); }
+    bx(fl, 0.08, 0.1, ironMat, fx, 2.2, -17); bx(fl, 0.08, 0.1, ironMat, fx, 0.4, -17);
+    const net = put(new THREE.PlaneGeometry(fl, 1.4), new THREE.MeshBasicMaterial({ map: chainTex, transparent: true, alphaTest: 0.4, side: THREE.DoubleSide }), fx, 3.3, -17, G, false);
+    net.material.map.repeat.set(fl / 0.8, 2);
+  });
+  // 守衛亭＋沙包
+  bx(2.4, 2.6, 2.2, plateRustMat, -4.5, 1.3, -14.5);
+  bx(2.8, 0.25, 2.6, ironMat, -4.5, 2.7, -14.5);
+  put(new THREE.PlaneGeometry(1.4, 0.9), winMat('glassLit'), -4.5, 1.7, -13.38, G, false);
+  const sandMat = new THREE.MeshStandardMaterial({ color: 0x5a5240, roughness: 1 });
+  for (let k = 0; k < 6; k++) { const sb = bx(0.9, 0.35, 0.5, sandMat, -3.0 + k * 0.45 - 1.2 + (k % 2) * 0.2, 0.2 + Math.floor(k / 3) * 0.33, -12.8); sb.rotation.y = rnd(-0.1, 0.1); }
+  // 遠景天際線：高樓剪影＋亮窗＋大煙囪冒煙＋時鐘塔
+  const backMat = new THREE.MeshStandardMaterial({ color: 0x151c18, roughness: 1 });
+  for (let i = -5; i <= 5; i++) {
+    const bw = 7 + Math.random() * 4, bh = 15 + Math.random() * 11;
+    const b = bx(bw, bh, 4, backMat, i * 8.6 + rnd(-1.5, 1.5), bh / 2, WZ - 6 - Math.random() * 5);
+    for (let k = 0; k < 7; k++) {
+      if (Math.random() < 0.4) continue;
+      put(new THREE.PlaneGeometry(0.6, 0.9), Math.random() < 0.6 ? chemGlowMat : amberGlowMat, b.position.x + rnd(-bw / 2 + 1, bw / 2 - 1), rnd(2, bh - 1.5), b.position.z + 2.03, G, false);
+    }
+  }
+  const ct = bx(3.6, 26, 3.6, wallMats[2], 14, 13, WZ - 12);                  // 時鐘塔
+  put(new THREE.CircleGeometry(1.4, 24), clockMat, 14, 22, WZ - 12 + 1.82, G, false);
+  put(new THREE.TorusGeometry(1.45, 0.12, 6, 24), brassMat, 14, 22, WZ - 12 + 1.82, G);
+  cyl(0.0, 2.8, 4, copperMat, 14, 28, WZ - 12, G, 4).rotation.y = Math.PI / 4;
+  [[-16, -34], [-26, -30], [24, -33], [4, -38]].forEach(([sx, sz], i) => {
+    const stackH = 14 + i * 3;
+    cyl(1.0, 1.4, stackH, rustMat, sx, stackH / 2, sz, G, 10);
+    const rim = put(new THREE.TorusGeometry(1.05, 0.12, 6, 12), ironMat, sx, stackH, sz); rim.rotation.x = Math.PI / 2;
+    const sm = put(new THREE.ConeGeometry(2.0, 6, 8), new THREE.MeshBasicMaterial({ color: ZAUN.smoke, transparent: true, opacity: 0.12, depthWrite: false }), sx + 0.6, stackH + 3.4, sz, G, false);
+    sm.rotation.z = 0.25;
+  });
+  // 兩側遠景樓牆：封住場景邊緣
+  [-1, 1].forEach(s => {
+    for (let k = 0; k < 6; k++) {
+      const hh = rnd(14, 24);
+      const b = bx(6, hh, 7, backMat, s * rnd(28, 31), hh / 2, -22 + k * 9);
+      for (let w = 0; w < 4; w++) if (Math.random() < 0.6) put(new THREE.PlaneGeometry(0.6, 0.9), Math.random() < 0.5 ? chemGlowMat : amberGlowMat, b.position.x - s * 3.03, rnd(2, hh - 1.5), b.position.z + rnd(-2.5, 2.5), G, false).rotation.y = -s * Math.PI / 2;
+    }
+  });
+  for (let k = -3; k <= 3; k++) bx(8, rnd(14, 22), 6, backMat, k * 9, 9, 33);   // 鏡頭後方
+
+  // ---------- 蒸氣龐克機械：齒輪、管橋、閥門、壓力錶、吊籠 ----------
+  const gearAt = (x, y, z, R, mat, rotY, teeth) => {
+    const gm = put(gearGeo(R, teeth || 14, 0.35), mat, x, y, z, G);
+    gm.rotation.y = rotY; return gm;
+  };
+  gearAt(-8.75, 7.5, -8.5, 1.8, brassMat, Math.PI / 2, 14);
+  gearAt(-8.75, 5.0, -7.4, 1.0, ironMat, Math.PI / 2, 10);
+  gearAt(8.7, 8.5, 3, 2.2, brassMat, -Math.PI / 2, 16);
+  gearAt(8.7, 6.2, 5.0, 1.2, copperMat, -Math.PI / 2, 10);
+  gearAt(8.7, 10.5, -6, 1.5, ironMat, -Math.PI / 2, 12);
+  // 頭頂管橋（沿用原結構）：粗管＋兩側 A 架，另加閥門輪與壓力錶、漏蒸氣
+  [-2, 9].forEach((pz, idx) => {
+    for (let k = 0; k < 3; k++) {
+      const cross = cyl(0.22, 0.22, 22, k === 1 ? verdiMat : rustMat, 0, 6.5 + idx * 1.6 + k * 0.55, pz, G, 9);
+      cross.rotation.z = Math.PI / 2;
+      if (k === 0) { const col = put(new THREE.TorusGeometry(0.28, 0.05, 5, 12), brassMat, -5 + idx * 3, 6.5 + idx * 1.6, pz, G); col.rotation.y = Math.PI / 2; }
+    }
+    [-8, 8].forEach(sx => {
+      const legL = bx(0.12, 6.5, 0.12, ironMat, sx - 0.8, 3.25, pz); legL.rotation.z = 0.12;
+      const legR = bx(0.12, 6.5, 0.12, ironMat, sx + 0.8, 3.25, pz); legR.rotation.z = -0.12;
+      bx(2.2, 0.1, 0.1, ironMat, sx, 5.2, pz);
+    });
+    const v = put(new THREE.TorusGeometry(0.4, 0.05, 6, 14), copperMat, 4.5, 8.4 + idx * 1.6, pz + 0.3, G); v.rotation.x = Math.PI / 2;   // 閥門輪
+    cyl(0.04, 0.04, 0.8, brassMat, 4.5, 8.0 + idx * 1.6, pz + 0.3, G, 5);
+    put(new THREE.CircleGeometry(0.3, 14), gaugeMat, -4.2, 7.0 + idx * 1.6, pz + 0.24, G, false);
+    steam(6.5, 6.9 + idx * 1.6, pz, 0.4);
+  });
+  // 吊籠與鎖鏈：掛在管橋上（囚籠）
+  [[-6.5, -2], [7, 9]].forEach(([cx, cz]) => {
+    const cage = new THREE.Group(); cage.position.set(cx, 3.2, cz); cage.rotation.y = rnd(0, 3);
+    for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; cyl(0.03, 0.03, 1.8, ironMat, Math.cos(a) * 0.55, 0, Math.sin(a) * 0.55, cage, 4); }
+    [-0.9, 0, 0.9].forEach(y => { const r = put(new THREE.TorusGeometry(0.56, 0.03, 4, 14), ironMat, 0, y, 0, cage); r.rotation.x = Math.PI / 2; });
+    cyl(0.01, 0.6, 0.4, ironMat, 0, 1.0, 0, cage, 8);
+    G.add(cage);
+    for (let k = 0; k < 9; k++) { const l = put(new THREE.TorusGeometry(0.07, 0.016, 4, 8), ironMat, cx, 4.5 + k * 0.28, cz, G, false); l.rotation.set(k % 2 ? 0 : Math.PI / 2, 0, 0); }
+  });
+  // 晾衣線與電線：橫跨街道的下垂線，掛幾塊破布
+  [[-9, 4, 9, 5.3, -10], [-9, 6, 9, 6.6, 6]].forEach(([x0, y0, x1, y1, z]) => {
+    const pts = [];
+    for (let t = 0; t <= 1; t += 0.05) pts.push(new THREE.Vector3(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t - Math.sin(t * Math.PI) * 1.1, z));
+    put(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, 0.02, 4), wireMat, 0, 0, 0, G, false);
+    for (let k = 0; k < 4; k++) {
+      const t = rnd(0.15, 0.85), c = new THREE.Mesh(new THREE.PlaneGeometry(rnd(0.4, 0.8), rnd(0.6, 1.1)), new THREE.MeshStandardMaterial({ color: pick([0x4a4a42, 0x55483a, 0x3a4a45, 0x5a3a3a]), roughness: 1, side: THREE.DoubleSide }));
+      c.position.set(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t - Math.sin(t * Math.PI) * 1.1 - 0.4, z);
+      c.rotation.y = rnd(-0.3, 0.3); G.add(c);
+    }
+  });
+
+  // ---------- 維多利亞瓦斯燈（sinsLamps 供 animate 閃爍；保留 3 盞＋Shimmer 紫窗）----------
+  [[-7.8, 2], [7.8, 10], [-7.8, 14]].forEach(([lx, lz], li) => {
+    const poleGrp = new THREE.Group();
+    poleGrp.position.set(lx, 0, lz);
+    bx(0.5, 0.6, 0.5, stoneMat, 0, 0.3, 0, poleGrp);
+    cyl(0.1, 0.14, 4.6, ironMat, 0, 2.9, 0, poleGrp, 8);
+    const ring = put(new THREE.TorusGeometry(0.17, 0.04, 5, 10), brassMat, 0, 1.2, 0, poleGrp); ring.rotation.x = Math.PI / 2;
+    const isAmber = li === 1;
+    const bulbMat = new THREE.MeshStandardMaterial({ color: isAmber ? 0x8a6a20 : 0x1a5a30, emissive: isAmber ? ZAUN.amber : ZAUN.chemGreen, emissiveIntensity: 1.5 });
+    bx(0.5, 0.1, 0.5, brassMat, 0, 5.15, 0, poleGrp);                              // 燈籠底
+    const bulb = put(new THREE.BoxGeometry(0.38, 0.55, 0.38), bulbMat, 0, 5.45, 0, poleGrp, false);   // 玻璃燈罩
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => bx(0.04, 0.6, 0.04, brassMat, a * 0.2, 5.45, b * 0.2, poleGrp));
+    cyl(0.0, 0.34, 0.3, brassMat, 0, 5.85, 0, poleGrp, 4).rotation.y = Math.PI / 4;
+    const lamp = new THREE.PointLight(isAmber ? 0xd4a017 : 0x39d353, 0.8, 14, 2);
+    lamp.position.set(0, 5.4, 0);
+    poleGrp.add(lamp);
+    poleGrp.rotation.z = rnd(-0.04, 0.04);
+    sinsLamps.push({ light: lamp, bulbMat, base: 0.8 });
+    G.add(poleGrp);
+  });
+  // 角色補光：街心上方一盞柔和的冷白光（只照亮近處），地面再墊一圈淡光暈
+  const fillLight = new THREE.PointLight(0xdfeee0, 0.9, 11, 2);
+  fillLight.position.set(0, 3.2, 3);
+  G.add(fillLight);
+  const poolTex = mkTex((g, w, h) => {
+    const gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+    gr.addColorStop(0, 'rgba(200,225,205,0.30)'); gr.addColorStop(1, 'rgba(200,225,205,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  }, 128, 128, 1);
+  const pool = put(new THREE.PlaneGeometry(15, 15), new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, depthWrite: false }), 0, 0.03, 2, G, false);
+  pool.rotation.x = -Math.PI / 2;
+  const shimmerWin = put(new THREE.BoxGeometry(0.9, 1.3, 0.08), shimmerGlowMat, 9.0, 3.2, -3.2, G, false);
+  shimmerWin.rotation.y = -Math.PI / 2;
+  const shimmerLight = new THREE.PointLight(0xa855f7, 0.5, 8, 2);
+  shimmerLight.position.set(8.0, 3.2, -3.2);
+  G.add(shimmerLight);
+  sinsLamps.push({ light: shimmerLight, bulbMat: shimmerGlowMat, base: 0.5 });
+
+  // ---------- 街頭殘骸：生鏽燒毀的車、木箱、油桶、推車、垃圾、瓦礫 ----------
+  function buildBurntCar(x, z, rotY) {
+    const grp = new THREE.Group(); grp.position.set(x, 0.05, z); grp.rotation.y = rotY;
+    const burnt = new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 1, metalness: 0.3 });
+    put(new THREE.BoxGeometry(3.4, 0.65, 1.5), burnt, 0, 0.5, 0, grp).rotation.z = 0.06;
+    put(new THREE.BoxGeometry(1.7, 0.6, 1.35), burnt, -0.15, 1.05, 0, grp).rotation.z = -0.08;
+    [[1.1, 0.75], [-1.1, -0.75], [1.1, -0.75]].forEach(([wx, wz]) => {
+      const rim = put(new THREE.TorusGeometry(0.3, 0.08, 6, 12), ironMat, wx, 0.3, wz, grp);
+      rim.rotation.x = Math.PI / 2 + rnd(-0.2, 0.2);
+    });
+    G.add(grp);
+  }
+  buildBurntCar(-6, 3, 0.5);
+  buildBurntCar(7, 14, -0.9);
+  [[6.4, 6], [-6.4, -9], [5.9, -12], [-5.6, 12]].forEach(([ox, oz]) => {      // 油桶
+    const b = cyl(0.42, 0.42, 1.0, plateRustMat, ox, 0.5, oz, G, 12);
+    [0.25, 0.75].forEach(y => { const r = put(new THREE.TorusGeometry(0.43, 0.025, 4, 14), ironMat, ox, y, oz); r.rotation.x = Math.PI / 2; });
+  });
+  [[5.2, -6], [-5.0, 8.5], [6.6, 0.5]].forEach(([ox, oz]) => {                // 木箱堆
+    const w = pick([0x4a3a28, 0x3e3426]);
+    const m = new THREE.MeshStandardMaterial({ color: w, roughness: 1 });
+    const c1 = bx(1.0, 1.0, 1.0, m, ox, 0.5, oz); c1.rotation.y = rnd(-0.4, 0.4);
+    const c2 = bx(0.8, 0.8, 0.8, m, ox + 0.2, 1.4, oz - 0.1); c2.rotation.y = rnd(-0.5, 0.5);
+  });
+  const cartG = new THREE.Group(); cartG.position.set(-6.2, 0.1, -2.5); cartG.rotation.y = 0.7; cartG.rotation.z = 0.15;   // 翻倒推車
+  bx(1.4, 0.15, 0.9, rustMat, 0, 0.5, 0, cartG);
+  [-1, 1].forEach(s => { const w = put(new THREE.TorusGeometry(0.32, 0.05, 6, 14), ironMat, 0, 0.35, s * 0.55, cartG); });
+  G.add(cartG);
+  const binMat = new THREE.MeshStandardMaterial({ color: 0x2a3a30, roughness: 0.9, metalness: 0.3 });
+  const bin = put(new THREE.CylinderGeometry(0.5, 0.45, 1.3, 10), binMat, 5.5, 0.45, 5, G);
+  bin.rotation.z = Math.PI / 2.3;
+  const trashMat = new THREE.MeshStandardMaterial({ color: 0x4a4a40, roughness: 1 });
+  for (let i = 0; i < 16; i++) {
+    const t = put(new THREE.BoxGeometry(0.2 + Math.random() * 0.3, 0.1, 0.2 + Math.random() * 0.3), trashMat, 5.5 + rnd(-1.5, 1.5), 0.06, 5 + rnd(-1.5, 1.5), G, false);
+    t.rotation.y = Math.random() * Math.PI;
+  }
+  for (let i = 0; i < 6; i++) {
+    const rubble = new THREE.Group();
+    do { rubble.position.set(rnd(-11, 11), 0, rnd(-10, 12)); } while (Math.hypot(rubble.position.x, rubble.position.z) < 6);
+    for (let j = 0; j < 4 + Math.random() * 4; j++) {
+      const chunk = put(new THREE.BoxGeometry(0.3 + Math.random() * 0.5, 0.2 + Math.random() * 0.4, 0.3 + Math.random() * 0.5), pick(wallMats), rnd(-0.7, 0.7), 0.12 + Math.random() * 0.3, rnd(-0.7, 0.7), rubble);
+      chunk.rotation.set(Math.random(), Math.random(), Math.random());
+    }
+    G.add(rubble);
+  }
+}
+
+// 舊版 Zaun 街屋環境（方塊街屋，已不再使用，保留以便還原）
+function buildSinsEnvironmentOld() {
   sinsEnvGroup = new THREE.Group();
   sinsEnvGroup.visible = false;
   scene.add(sinsEnvGroup);
@@ -2006,24 +4325,31 @@ function buildLoveCreature() {
   loveAura = new THREE.Mesh(auraGeo, auraMat);
   loveAura.scale.set(1.05, 1.30, 1.00);
   loveAura.position.y = -0.05;
+  loveAura.visible = false;   // 移除布殼外的橢圓光區（物件與動畫保留，只是不顯示；想恢復改成 true）
   loveGroup.add(loveAura);
 
   // B. 擁抱雙翼 (Embrace Wings) - 有機羽毛層疊展開的金紅光翼
   const featherGeo = createLoveFeatherGeometry();
-  const featherMat = new THREE.MeshPhysicalMaterial({
-    color: 0xffe3d0,
-    emissive: 0xf5c9a8,
-    emissiveIntensity: 0.35,
-    transmission: 0,
-    thickness: 0,
-    roughness: 0.5,
-    transparent: true,
-    opacity: 0.92,
-    side: THREE.DoubleSide,
-  });
+  const makeFeatherMat = (kind) => {
+    const tex = createLoveFeatherTexture(kind);
+    return new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      emissive: 0xfff6ee,
+      emissiveIntensity: 0.3,
+      map: tex,
+      emissiveMap: tex,
+      roughness: 0.6,
+      transparent: true,
+      opacity: 1,
+      alphaTest: 0.35,
+      side: THREE.DoubleSide,
+    });
+  };
+  const flightMat = makeFeatherMat('flight');
+  const covertMat = makeFeatherMat('covert');
 
-  loveWings.push(buildLoveWing(1, featherGeo, featherMat));
-  loveWings.push(buildLoveWing(-1, featherGeo, featherMat));
+  loveWings.push(buildLoveWing(1, featherGeo, flightMat, covertMat));
+  loveWings.push(buildLoveWing(-1, featherGeo, flightMat, covertMat));
 
   // C. 覓食匯流微粒群 (Emotion Foraging Particle Swarm)
   // 象徵 5000 年後渴望吸收的人類詩歌、誓言與情感結晶
@@ -2254,88 +4580,273 @@ function createSpiralDiskMaterial() {
   });
 }
 
-// 羽毛幾何：貝茲曲線畫出有機羽形並擠出薄厚度（帶圓角邊），再沿長度向後彎、兩側上翹成微杯狀
-function createLoveFeatherGeometry() {
-  const shape = new THREE.Shape();
-  shape.moveTo(0, 0);
-  shape.bezierCurveTo(0.16, 0.2, 0.18, 0.6, 0.08, 0.94);
-  shape.quadraticCurveTo(0.035, 1.04, 0, 1.1);
-  shape.quadraticCurveTo(-0.035, 1.04, -0.08, 0.94);
-  shape.bezierCurveTo(-0.18, 0.6, -0.16, 0.2, 0, 0);
+// 羽毛貼圖（依鳥類真實構造）：
+//  · 羽軸 (rachis) 偏向前緣，前緣羽片窄、後緣羽片寬（飛羽不對稱）
+//  · 羽片是「封閉的一整面」（羽小鉤把羽枝扣在一起），不是一根根分開的線；羽枝只是表面細紋
+//  · 飛羽近羽尖處有缺刻 (emargination)，羽根有蓬鬆的絨羽 (plumulaceous)
+//  kind: 'flight' 飛羽（初級／次級／三級）｜ 'covert' 覆羽（短、圓、較對稱）
+function createLoveFeatherTexture(kind) {
+  const W = 128, H = 512;
+  const sx = W * 0.4; // 羽軸位置
+  const Lmax = sx - 3, Rmax = W - sx - 3;
+  const flight = kind === 'flight';
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  let seed = flight ? 11 : 23;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
 
-  const depth = 0.04;
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: depth,
-    bevelEnabled: true,
-    bevelThickness: 0.02,
-    bevelSize: 0.015,
-    bevelSegments: 2,
-  });
-  const pos = geo.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    pos.setZ(i, pos.getZ(i) - depth * 0.5 - 0.28 * y * y + Math.abs(x) * 0.5 * y);
+  // 側邊半寬（v: 0 羽根 → 1 羽尖）
+  const prof = (v) => {
+    const base = Math.pow(Math.sin(Math.PI * Math.pow(v, flight ? 0.85 : 0.9)), flight ? 0.45 : 0.6);
+    return base * Math.min(1, Math.pow(v / (flight ? 0.14 : 0.08), 1.2));
+  };
+  const half = (v, side) => {
+    const p = Math.max(prof(v), 0);
+    if (side < 0) { // 前緣（窄）
+      let w = Lmax * (flight ? 0.62 : 0.9) * p;
+      if (flight) w *= 1 - 0.3 * Math.exp(-Math.pow((v - 0.78) / 0.05, 2));
+      return w;
+    }
+    let w = Rmax * (flight ? 1.0 : 0.95) * p; // 後緣（寬）
+    if (flight) w *= 1 - 0.22 * Math.exp(-Math.pow((v - 0.72) / 0.06, 2));
+    return w;
+  };
+
+  // 1) 封閉羽片輪廓（實心）
+  const steps = 96;
+  const path = new Path2D();
+  for (let i = 0; i <= steps; i++) {
+    const v = i / steps, y = H * (1 - v);
+    const x = sx - half(v, -1);
+    if (i === 0) path.moveTo(x, y); else path.lineTo(x, y);
   }
-  geo.computeVertexNormals();
-  return geo;
+  for (let i = steps; i >= 0; i--) {
+    const v = i / steps, y = H * (1 - v);
+    path.lineTo(sx + half(v, 1), y);
+  }
+  path.closePath();
+  const fillG = g.createLinearGradient(0, 0, W, 0);
+  fillG.addColorStop(0, 'rgb(246,248,252)');
+  fillG.addColorStop(0.4, 'rgb(255,255,255)');
+  fillG.addColorStop(1, 'rgb(244,246,251)');
+  g.fillStyle = fillG;
+  g.fill(path);
+
+  // 2) 羽枝細紋（只畫在羽片內，斜向羽尖；明暗交錯＝羽小鉤扣合的絲質感）
+  g.save();
+  g.clip(path);
+  g.lineCap = 'round';
+  for (let y = H - 4; y > 4; y -= 1.7) {
+    const v = 1 - y / H;
+    for (const dir of [-1, 1]) {
+      const len = half(v, dir) * 1.25 + 6;
+      const sweep = len * (0.7 + rnd() * 0.15);
+      const dark = rnd() < 0.5;
+      g.strokeStyle = dark
+        ? 'rgba(206,214,230,' + (0.18 + rnd() * 0.2).toFixed(2) + ')'
+        : 'rgba(255,255,255,' + (0.5 + rnd() * 0.3).toFixed(2) + ')';
+      g.lineWidth = 0.8 + rnd() * 0.9;
+      g.beginPath();
+      g.moveTo(sx + dir * 2, y);
+      g.quadraticCurveTo(sx + dir * len * 0.55, y - sweep * 0.15, sx + dir * len, y - sweep);
+      g.stroke();
+    }
+  }
+  // 羽軸兩側微陰影，製造立體感
+  const rs = g.createLinearGradient(sx - 9, 0, sx + 9, 0);
+  rs.addColorStop(0, 'rgba(200,208,226,0)');
+  rs.addColorStop(0.5, 'rgba(200,208,226,0.35)');
+  rs.addColorStop(1, 'rgba(200,208,226,0)');
+  g.fillStyle = rs;
+  g.fillRect(sx - 9, 0, 18, H);
+  g.restore();
+
+  // 3) 後緣極細的羽枝分裂（窄縫，不是大洞）
+  if (flight) {
+    g.save();
+    g.globalCompositeOperation = 'destination-out';
+    g.lineCap = 'round';
+    for (let k = 0; k < 7; k++) {
+      const v = 0.28 + rnd() * 0.6;
+      const y = H * (1 - v);
+      const w0 = half(v, 1);
+      g.lineWidth = 0.9;
+      g.beginPath();
+      g.moveTo(sx + w0 + 2, y);
+      g.lineTo(sx + w0 - (9 + rnd() * 12), y - (6 + rnd() * 8));
+      g.stroke();
+    }
+    g.restore();
+  }
+
+  // 4) 羽根絨羽（蓬鬆、無羽小鉤）
+  g.lineCap = 'round';
+  for (let k = 0; k < 46; k++) {
+    const y = H - 2 - rnd() * H * 0.2;
+    const dir = rnd() < 0.5 ? -1 : 1;
+    const len = 10 + rnd() * 26;
+    g.strokeStyle = 'rgba(255,255,255,' + (0.5 + rnd() * 0.4).toFixed(2) + ')';
+    g.lineWidth = 1 + rnd() * 0.8;
+    g.beginPath();
+    g.moveTo(sx + dir * 2, y);
+    g.quadraticCurveTo(sx + dir * len * 0.6, y - len * 0.2, sx + dir * len, y - len * (0.5 + rnd() * 0.5));
+    g.stroke();
+  }
+
+  // 5) 羽軸（根部粗、往羽尖漸細）
+  g.fillStyle = 'rgb(255,251,244)';
+  g.beginPath();
+  g.moveTo(sx - 2.6, H);
+  g.lineTo(sx + 2.6, H);
+  g.lineTo(sx + 0.7, H * 0.045);
+  g.lineTo(sx - 0.7, H * 0.045);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = 'rgba(205,212,228,0.75)';
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(sx + 2.2, H);
+  g.lineTo(sx + 0.8, H * 0.06);
+  g.stroke();
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
-// 單側翅膀：主羽扇形展開 + 覆羽蓋住羽根，pivot 為搧動軸心
-function buildLoveWing(side, geo, mat) {
+// 羽毛幾何：細分平面，羽軸對齊 x=0；沿長度向後彎、兩側微微下垂成弧面
+function createLoveFeatherGeometry() {
+  // 厚度：上下兩層薄片（相距 THICK）＋ 羽軸處隆起的脊，從側面看有真實的厚度
+  const THICK = 0.07;
+  const RIDGE = 0.06;
+  const sheet = (zOff, ridgeK) => {
+    const g = new THREE.PlaneGeometry(0.5, 1.1, 10, 28);
+    g.translate(0.05, 0.55, 0); // 羽軸（貼圖 u=0.4）移到 x=0，羽根在原點，羽尖朝 +y
+    const pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const ridge = ridgeK * RIDGE * Math.exp(-Math.pow(x / 0.035, 2)) * (1 - 0.6 * y);
+      const z = -0.22 * y * y - Math.abs(x) * (0.3 + 0.2 * y) + zOff + ridge;
+      pos.setZ(i, z);
+      pos.setX(i, x + 0.05 * y * y);
+    }
+    return g;
+  };
+  const front = sheet(THICK / 2, 1);
+  const back = sheet(-THICK / 2, -0.6);
+  const merged = new THREE.BufferGeometry();
+  const attr = (name) => {
+    const a = front.attributes[name].array, b = back.attributes[name].array;
+    const out = new Float32Array(a.length + b.length);
+    out.set(a, 0); out.set(b, a.length);
+    merged.setAttribute(name, new THREE.BufferAttribute(out, front.attributes[name].itemSize));
+  };
+  attr('position'); attr('uv');
+  const ia = front.index.array, off = front.attributes.position.count;
+  const idx = new Uint16Array(ia.length * 2);
+  idx.set(ia, 0);
+  for (let i = 0; i < ia.length; i++) idx[ia.length + i] = ia[i] + off;
+  merged.setIndex(new THREE.BufferAttribute(idx, 1));
+  merged.computeVertexNormals();
+  return merged;
+}
+
+// 單側翅膀：依鳥翼骨架分層
+//   骨架（翅膀平面）：肩 S → 腕 W → 手 T（前緣拱起）
+//   · 次級飛羽 (secondaries)：長在前臂 S→W
+//   · 初級飛羽 (primaries)：長在手骨 W→T，最長，呈扇形展開
+//   · 三級飛羽 (tertials)：靠身體最內側
+//   · 覆羽三排 (greater／median／lesser coverts)：一層層像屋瓦蓋住飛羽根部
+//   · 小翼羽 (alula)：腕關節前緣的小羽
+// pivot 為搧動軸心
+function buildLoveWing(side, geo, flightMat, covertMat) {
   const pivot = new THREE.Group();
-  pivot.position.set(0.6 * side, 0.3, -0.3);
+  pivot.position.set(0.6 * side, 0.3, LOVE_WING_Z);
   pivot.rotation.y = side * 0.28;
   loveGroup.add(pivot);
 
   const feathers = [];
+  const D = Math.PI / 180;
+  const WK = 0.72; // 整體翅膀尺寸係數
+  const S = { x: 0.2, y: 0.3 }, Wr = { x: 1.75, y: 2.0 }, T = { x: 3.45, y: 2.55 };
+  const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  const armPoint = (u) => (u < 0.5 ? lerp(S, Wr, u * 2) : lerp(Wr, T, (u - 0.5) * 2));
+  const armTheta = (u) => (u < 0.5 ? -118 + 20 * (u * 2) : -98 + 78 * ((u - 0.5) * 2));
 
-  const primaryCount = 12;
-  for (let i = 0; i < primaryCount; i++) {
-    const t = i / (primaryCount - 1);
-    const phi = 2.75 + t * 1.66;
-    const len = 1.0 + 1.3 * Math.pow(t, 1.2);
+  // base：翅膀平面座標（以右翼為準，左翼用 side 鏡像）；thetaDeg：羽毛指向角
+  const add = (mat, base, thetaDeg, len, width, z, tilt, emis, curl) => {
     const f = new THREE.Mesh(geo, mat.clone());
-    f.material.emissiveIntensity = 0.45 + t * 0.5;
-    f.position.set(
-      side * (0.2 + 3.2 * Math.pow(t, 0.95)),
-      0.15 + 1.5 * Math.sin(t * Math.PI * 0.6),
-      -0.05 * i
-    );
-    f.rotation.z = side * phi;
-    f.rotation.x = 0.15 + 0.5 * t;
-    f.scale.set(1.0 + 0.4 * t, len, 1);
+    f.rotation.order = 'YXZ'; // 先 Z（羽毛指向）→ X（傾斜）→ Y（環抱時沿圓弧轉向）
+    f.material.emissiveIntensity = emis;
+    f.position.set(side * base.x * WK, base.y * WK, z);
+    f.rotation.z = side * (thetaDeg * D - Math.PI / 2);
+    f.rotation.x = tilt;
+    f.scale.set(side * width * WK, (len * WK) / 1.1, 1); // 左翼 x 取負＝鏡像，窄的前緣羽片永遠朝外
     f.userData.basePos = f.position.clone();
     f.userData.baseRotX = f.rotation.x;
     f.userData.baseRotZ = f.rotation.z;
     f.userData.baseScale = f.scale.clone();
-    f.userData.baseEmissive = 0.45 + t * 0.5;
+    f.userData.baseEmissive = emis;
+    f.userData.curl = curl;
+    f.userData.theta = thetaDeg; // 攤開時羽毛指向角（度），環抱時往「朝下垂」混合
     feathers.push(f);
     pivot.add(f);
+  };
+  const jitter = (i) => Math.sin(i * 12.9898) * 1.4;
+  const flightList = []; // 記住每根飛羽，覆羽依它定位
+
+  // 三級飛羽（最內側、蓋在次級上）
+  for (let i = 0; i < 3; i++) {
+    const base = { x: S.x - 0.05 + i * 0.1, y: S.y + 0.05 - i * 0.05 };
+    add(flightMat, base, -124 + i * 5, 1.75 - i * 0.12, 1.35, 0.05 + i * 0.01, 0.06, 0.3, i);
   }
-
-  const covertCount = 9;
-  for (let i = 0; i < covertCount; i++) {
-    const t = i / (covertCount - 1);
-    const phi = 2.65 + t * 1.4;
-    const len = 0.55 + 0.75 * t;
-    const f = new THREE.Mesh(geo, mat.clone());
-    f.material.emissiveIntensity = 0.4 + t * 0.35;
-    f.position.set(
-      side * (0.15 + 2.2 * Math.pow(t, 0.95)),
-      0.05 + 0.95 * Math.sin(t * Math.PI * 0.6),
-      0.2 - 0.04 * i
-    );
-    f.rotation.z = side * phi;
-    f.rotation.x = 0.1 + 0.3 * t;
-    f.scale.set(0.8 + 0.25 * t, len, 1);
-    f.userData.basePos = f.position.clone();
-    f.userData.baseRotX = f.rotation.x;
-    f.userData.baseRotZ = f.rotation.z;
-    f.userData.baseScale = f.scale.clone();
-    f.userData.baseEmissive = 0.4 + t * 0.35;
-    feathers.push(f);
-    pivot.add(f);
+  // 次級飛羽 12
+  for (let i = 0; i < 12; i++) {
+    const t = i / 11;
+    const base = lerp(S, Wr, t);
+    const th = -118 + 20 * t + jitter(i);
+    const len = 2.1 + 0.35 * t;
+    flightList.push({ base, th, len, width: 1.15 });
+    add(flightMat, base, th, len, 1.15, -0.02 * i, 0.07, 0.3, i);
+  }
+  // 初級飛羽 10（扇形，中段最長）
+  for (let i = 0; i < 10; i++) {
+    const t = i / 9;
+    const base = lerp(Wr, T, t);
+    const th = -98 + 78 * t + jitter(i + 20);
+    const len = 2.2 + 1.15 * Math.sin(Math.PI * (0.2 + 0.65 * t));
+    flightList.push({ base, th, len, width: 1.0 });
+    add(flightMat, base, th, len, 1.0, -0.02 * (i + 12), 0.08, 0.3, 12 + i);
+  }
+  // 大覆羽：每根飛羽一根，蓋住羽根約三分之一
+  flightList.forEach((ff, i) => {
+    const d = { x: Math.cos(ff.th * D), y: Math.sin(ff.th * D) };
+    const shift = 0.15;
+    const base = { x: ff.base.x - d.x * shift, y: ff.base.y - d.y * shift };
+    add(covertMat, base, ff.th, 0.4 * ff.len + shift, ff.width * 0.95, 0.12, 0.1, 0.32, i % 12);
+  });
+  // 中覆羽 14
+  for (let i = 0; i < 14; i++) {
+    const u = i / 13;
+    const bp = armPoint(u), th = armTheta(u) + jitter(i + 40);
+    const d = { x: Math.cos(th * D), y: Math.sin(th * D) };
+    const base = { x: bp.x - d.x * 0.1, y: bp.y - d.y * 0.1 };
+    add(covertMat, base, th, 0.95 - 0.2 * u, 0.9, 0.24, 0.12, 0.34, i);
+  }
+  // 小覆羽 16（最短、最圓，貼在前緣）
+  for (let i = 0; i < 16; i++) {
+    const u = i / 15;
+    const bp = armPoint(u), th = armTheta(u) + jitter(i + 60);
+    const d = { x: Math.cos(th * D), y: Math.sin(th * D) };
+    const base = { x: bp.x - d.x * 0.2, y: bp.y - d.y * 0.2 };
+    add(covertMat, base, th, 0.55, 0.75, 0.36, 0.14, 0.36, i);
+  }
+  // 小翼羽 3（腕關節前緣，朝外上方）
+  for (let i = 0; i < 3; i++) {
+    add(covertMat, { x: Wr.x + 0.05 * i, y: Wr.y + 0.1 }, 8 + i * 20, 0.95 - i * 0.18, 0.6, 0.25 + i * 0.01, 0.1, 0.36, i);
   }
 
   return { pivot, feathers, side, phase: side > 0 ? 0 : 0.5 };
@@ -2353,7 +4864,7 @@ function shedLoveWings() {
   stopLoveWingTweens();
 
   loveWings.forEach((w) => {
-    w.pivot.position.set(0.6 * w.side, 0.3, -0.3);
+    w.pivot.position.set(0.6 * w.side, 0.3, LOVE_WING_Z);
     new TWEEN.Tween(w.pivot.rotation).to({ y: w.side * 0.28 }, 700).easing(TWEEN.Easing.Quadratic.Out).start();
     const droop = new TWEEN.Tween(w.pivot.rotation)
       .to({ z: w.side * -0.45 }, 700)
@@ -2372,11 +4883,11 @@ function shedLoveWings() {
           y: f.userData.baseScale.y * 0.5,
           z: f.userData.baseScale.z * 0.7,
         }, 650)
-        .delay(idx * 15)
+        .delay(idx * 6)
         .easing(TWEEN.Easing.Quadratic.In);
       const witherR = new TWEEN.Tween(f.rotation)
         .to({ x: f.userData.baseRotX + 0.7 }, 650)
-        .delay(idx * 15)
+        .delay(idx * 6)
         .easing(TWEEN.Easing.Quadratic.In);
       loveWingTweens.push(witherS, witherR);
       witherS.start();
@@ -2395,7 +4906,7 @@ function shedLoveWings() {
       w.feathers.forEach((f, idx) => {
         loveGroup.attach(f);
 
-        const fallDelay = idx * 70 + (w.side > 0 ? 0 : 120);
+        const fallDelay = idx * 22 + (w.side > 0 ? 0 : 120);
         const fall = new TWEEN.Tween(f.position)
           .to({
             x: f.position.x + w.side * (1.2 + Math.random() * 1.5),
@@ -2453,7 +4964,7 @@ function regrowLoveWings() {
 
   loveWings.forEach((w) => {
     const pivot = w.pivot;
-    pivot.position.set(0.6 * w.side, 0.3, -0.3);
+    pivot.position.set(0.6 * w.side, 0.3, LOVE_WING_Z);
     const pRise = new TWEEN.Tween(pivot.scale)
       .to({ x: 1, y: 1, z: 1 }, 900)
       .easing(TWEEN.Easing.Back.Out);
@@ -2467,10 +4978,10 @@ function regrowLoveWings() {
     w.feathers.forEach((f, idx) => {
       pivot.attach(f);
       f.visible = true;
-      f.material.opacity = 0.92;
+      f.material.opacity = 1;
       regrowPending++;
 
-      const delay = idx * 45;
+      const delay = idx * 14;
       const backP = new TWEEN.Tween(f.position)
         .to({ x: f.userData.basePos.x, y: f.userData.basePos.y, z: f.userData.basePos.z }, 850)
         .delay(delay)
@@ -2504,6 +5015,28 @@ function regrowLoveWings() {
 function triggerLoveAssimilate() {
   if (isLoveAssimilating) return;
   isLoveAssimilating = true;
+
+  // FIXED-011: 過度耗損後翅膀已脫落（loveWingMode !== 'normal'），舊版擁抱沒有翅膀可抱、只有覓食才會長回來。
+  //   現在：先讓翅膀長回來，長好（回到 normal）才開始擁抱；最多等 5 秒避免卡住。
+  if (loveWingMode !== 'normal') {
+    loveEnergyText.innerText = "翅膀重新長出…準備擁抱";
+    regrowLoveWings();
+    let waited = 0;
+    const iv = setInterval(() => {
+      waited += 100;
+      if (loveWingMode === 'normal' || waited >= 5000) {
+        clearInterval(iv);
+        runLoveEmbrace();
+      }
+    }, 100);
+    return;
+  }
+  runLoveEmbrace();
+}
+
+// 實際的擁抱動作（翅膀確定在場才呼叫）
+function runLoveEmbrace() {
+  if (typeof LoveVoice !== 'undefined') LoveVoice.embrace(); // 擁抱時叫得更豐富（10 秒冷卻）
   setLoveFeeding(false); // 抱擁時先收起覓食光線
 
   // 雙翼放大並向前環抱合攏
@@ -2561,7 +5094,7 @@ function triggerLoveAssimilate() {
         }
       })
       .start();
-  }, 1200);
+  }, 2600); // 環抱停留 2.6 秒（原 1.2 秒，剛抱滿就放開了）
 }
 
 // 覓食光線開關：開則每幀跟著愛移動，關則淡出
@@ -3180,108 +5713,211 @@ function createRuneTextures(count) {
   return texs;
 }
 
+// 字形的「文法」取自幾種真實古文明書寫的共通特徵（但每顆都是隨機生成、不是任何真實文字）：
+//   0 棍幹符文：一根主幹＋只用 45° 斜枝與三角環（刻在木／石上，不會有水平線與曲線）
+//   1 楔形文字：泥板上壓出的三角楔，橫／直／斜三種方向成組排列
+//   2 刻痕文字：一條主線上刻短劃，一組一組分開（歐甘式）
+//   3 方塊聖書體：圓角方框＋圓點與橫槓（像馬雅的數字與字塊），外側有小耳
+//   4 象形符號：環頂十字、太陽、眼睛三種
+//   5 岩畫螺旋＋刻痕
+// 外加 40% 機率加上石碑角框，像刻在碑面上的一行字
 function drawRuneGlyph(ctx, S) {
-  const m = S * 0.2;               // 邊界留白
-  const style = Math.floor(Math.random() * 4);
+  const m = S * 0.2;
+  const C = S / 2;
+  const SNAP = [Math.PI / 4, -Math.PI / 4, (3 * Math.PI) / 4, (-3 * Math.PI) / 4];
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  const line = (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+
+  // 楔形：頭寬尾尖的細長三角（填滿），ang 為尾巴指向
+  const wedge = (x, y, ang, len, w) => {
+    const dx = Math.cos(ang), dy = Math.sin(ang);
+    const px = -dy, py = dx;
+    ctx.beginPath();
+    ctx.moveTo(x + px * w / 2, y + py * w / 2);
+    ctx.lineTo(x - px * w / 2, y - py * w / 2);
+    ctx.lineTo(x + dx * len, y + dy * len);
+    ctx.closePath();
+    ctx.fill();
+  };
+  const roundRect = (x, y, w, h, r) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  };
+
   ctx.save();
+  ctx.fillStyle = 'rgb(255,255,255)';
+  const style = Math.floor(Math.random() * 6);
 
   if (style === 0) {
-    // 直立主幹＋斜枝，像刻在石碑上的記號
-    const x = S / 2, y0 = m, y1 = S - m;
-    ctx.beginPath();
-    ctx.moveTo(x, y0);
-    ctx.lineTo(x, y1);
-    ctx.stroke();
-    const branches = 3 + Math.floor(Math.random() * 2);
-    for (let i = 0; i < branches; i++) {
-      const t = (i + 0.4 + Math.random() * 0.4) / branches;
-      const y = y0 + (y1 - y0) * (0.16 + 0.68 * t);
-      const dir = Math.random() > 0.5 ? 1 : -1;
-      const len = S * (0.13 + Math.random() * 0.15);
-      const a = 0.5 + Math.random() * 0.6;       // 與主幹的夾角
-      const up = Math.random() > 0.35;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + dir * Math.sin(a) * len, y + (up ? -1 : 1) * Math.cos(a) * len);
-      ctx.stroke();
-      if (Math.random() > 0.5) {                 // 有時候多一短橫
+    // —— 棍幹符文 ——
+    const x = C, y0 = m, y1 = S - m;
+    line(x, y0, x, y1);
+    const twin = Math.random() < 0.28;                  // 有時是雙幹（像 ᚺ ᛖ 一類的形狀）
+    const x2 = x + S * rnd(0.12, 0.17);
+    if (twin) line(x2, y0, x2, y1);
+    const parts = 1 + Math.floor(Math.random() * 3);
+    const levels = [0.15, 0.4, 0.62].sort(() => Math.random() - 0.5).slice(0, parts).sort();
+    levels.forEach((lv) => {
+      const ya = y0 + (y1 - y0) * lv;
+      const L = S * rnd(0.12, 0.2);
+      const kind = Math.random();
+      if (kind < 0.4) {
+        // 三角環（像 ᚹ ᚦ ᛒ 的環）
+        const d = Math.random() > 0.5 ? 1 : -1;
         ctx.beginPath();
-        ctx.moveTo(x + dir * len * 0.4, y + (up ? -1 : 1) * len * 0.35);
-        ctx.lineTo(x + dir * len * 0.9, y + (up ? -1 : 1) * len * 0.5);
+        ctx.moveTo(x, ya);
+        ctx.lineTo(x + d * L, ya + L * 0.75);
+        ctx.lineTo(x, ya + L * 1.5);
+        if (Math.random() > 0.4) ctx.closePath();
         ctx.stroke();
+      } else if (kind < 0.8) {
+        // 45° 單斜枝，向上或向下
+        const a = pick(SNAP);
+        line(x, ya, x + Math.cos(a) * L * 1.2, ya + Math.sin(a) * L * 1.2);
+      } else {
+        // 對稱雙斜枝（像 ᛉ ᚨ 的叉）
+        line(x, ya, x - L, ya - L);
+        line(x, ya, x + L, ya - L);
+      }
+    });
+    if (Math.random() < 0.3) line(x - S * 0.12, y0 + S * 0.1, x + S * 0.12, y1 - S * 0.1);   // 貫穿斜線
+  } else if (style === 1) {
+    // —— 楔形文字 ——
+    const rows = 2 + Math.floor(Math.random() * 2);
+    const rowH = (S - 2 * m) / rows;
+    for (let r = 0; r < rows; r++) {
+      const cols = 1 + Math.floor(Math.random() * 3);
+      const cy = m + rowH * (r + 0.5);
+      let cx = m + rnd(0, S * 0.05);
+      for (let c = 0; c < cols; c++) {
+        const kind = Math.random();
+        const w = S * rnd(0.06, 0.085), len = S * rnd(0.13, 0.2);
+        if (kind < 0.4) { wedge(cx, cy, 0, len, w); cx += len + S * 0.05; }                        // 橫楔
+        else if (kind < 0.75) { wedge(cx, cy - len / 2, Math.PI / 2, len, w); cx += w + S * 0.07; } // 直楔
+        else {                                                                                       // 角楔（兩個斜楔相對）
+          wedge(cx, cy - len * 0.35, Math.PI / 4, len * 0.7, w * 0.9);
+          wedge(cx + len * 0.1, cy + len * 0.35, -Math.PI / 4, len * 0.7, w * 0.9);
+          cx += len * 0.75 + S * 0.05;
+        }
+        if (cx > S - m) break;
       }
     }
-  } else if (style === 1) {
-    // 不規則閉合多邊形＋交叉線，像封印記號
-    const n = 5 + Math.floor(Math.random() * 3);
-    const pts = [];
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
-      const rr = (S / 2 - m) * (0.7 + Math.random() * 0.45);
-      pts.push([S / 2 + Math.cos(a) * rr, S / 2 + Math.sin(a) * rr]);
-    }
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < n; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-    if (Math.random() > 0.4) ctx.closePath();
-    ctx.stroke();
-    const cuts = 2 + Math.floor(Math.random() * 2);
-    for (let i = 0; i < cuts; i++) {
-      const a = pts[Math.floor(Math.random() * n)];
-      const b = pts[Math.floor(Math.random() * n)];
-      ctx.beginPath();
-      ctx.moveTo(a[0], a[1]);
-      ctx.lineTo(b[0], b[1]);
-      ctx.stroke();
-    }
   } else if (style === 2) {
-    // 圓＋內接多邊形＋外側刻度，像印璽／星圖
-    const R = S / 2 - m;
-    ctx.beginPath();
-    ctx.arc(S / 2, S / 2, R, 0, Math.PI * 2);
+    // —— 刻痕文字 ——
+    const x = C, y0 = m, y1 = S - m;
+    line(x, y0, x, y1);
+    const groups = 1 + Math.floor(Math.random() * 2);
+    let y = y0 + S * 0.04;
+    for (let g = 0; g < groups; g++) {
+      const n = 1 + Math.floor(Math.random() * 4);
+      const mode = Math.floor(Math.random() * 3);         // 0 左側 1 右側 2 貫穿斜刻
+      for (let i = 0; i < n; i++) {
+        const yy = y + i * S * 0.07;
+        const L = S * rnd(0.1, 0.14);
+        if (mode === 0) line(x, yy, x - L, yy);
+        else if (mode === 1) line(x, yy, x + L, yy);
+        else line(x - L, yy + L * 0.4, x + L, yy - L * 0.4);
+      }
+      y += n * S * 0.07 + S * 0.08;                      // 組與組之間留空
+      if (y > y1 - S * 0.05) break;
+    }
+  } else if (style === 3) {
+    // —— 方塊聖書體 ——
+    const w = S * 0.5, h = S * 0.58;
+    const x0 = C - w / 2, y0 = C - h / 2;
+    ctx.save();
+    ctx.lineWidth = S * 0.034;
+    roundRect(x0, y0, w, h, S * 0.07);
     ctx.stroke();
-    const sides = 3 + Math.floor(Math.random() * 3);
-    const rot = Math.random() * Math.PI;
+    ctx.restore();
+    // 內部（刻意不對稱，避免看起來像臉）：左欄圓點直排（點＝1）、右欄粗豎槓（槓＝5）、頂部一個小螺旋
+    const dr = S * 0.026;
+    const dots = 2 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < dots; i++) {
+      ctx.beginPath(); ctx.arc(x0 + w * 0.3, y0 + h * (0.34 + i * (0.5 / dots)), dr, 0, Math.PI * 2); ctx.fill();
+    }
+    const bars = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < bars; i++) {
+      roundRect(x0 + w * (0.55 + i * 0.16), y0 + h * 0.3, S * 0.04, h * 0.52, S * 0.015);
+      ctx.fill();
+    }
     ctx.beginPath();
-    for (let i = 0; i <= sides; i++) {
-      const a = rot + (i / sides) * Math.PI * 2;
-      const px = S / 2 + Math.cos(a) * R * 0.6;
-      const py = S / 2 + Math.sin(a) * R * 0.6;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
+    for (let i = 0; i <= 24; i++) {
+      const a = (i / 24) * Math.PI * 3, r = S * 0.006 + (i / 24) * S * 0.035;
+      const px = x0 + w * 0.3 + Math.cos(a) * r, py = y0 + h * 0.16 + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
     }
     ctx.stroke();
-    const ticks = 3 + Math.floor(Math.random() * 4);
-    for (let i = 0; i < ticks; i++) {
-      const a = Math.random() * Math.PI * 2;
+  } else if (style === 4) {
+    // —— 象形符號 ——
+    const k = Math.floor(Math.random() * 3);
+    if (k === 0) {
+      // 環頂十字（像生命符）
+      const R = S * 0.12;
+      ctx.beginPath(); ctx.ellipse(C, m + R * 1.2, R * 0.8, R * 1.2, 0, 0, Math.PI * 2); ctx.stroke();
+      line(C, m + R * 2.4, C, S - m);
+      line(C - S * 0.16, m + R * 3.2, C + S * 0.16, m + R * 3.2);
+    } else if (k === 1) {
+      // 太陽：圓環＋中心點＋放射短線
+      const R = S * 0.14;
+      ctx.beginPath(); ctx.arc(C, C, R, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(C, C, S * 0.028, 0, Math.PI * 2); ctx.fill();
+      const rays = pick([8, 12]);
+      for (let i = 0; i < rays; i++) {
+        const a = (i / rays) * Math.PI * 2;
+        line(C + Math.cos(a) * (R + S * 0.04), C + Math.sin(a) * (R + S * 0.04), C + Math.cos(a) * (R + S * 0.12), C + Math.sin(a) * (R + S * 0.12));
+      }
+    } else {
+      // 眼睛：杏仁形＋瞳孔＋下垂淚線
+      const wI = S * 0.3, hI = S * 0.15;
       ctx.beginPath();
-      ctx.moveTo(S / 2 + Math.cos(a) * R * 0.9, S / 2 + Math.sin(a) * R * 0.9);
-      ctx.lineTo(S / 2 + Math.cos(a) * (R + S * 0.06), S / 2 + Math.sin(a) * (R + S * 0.06));
+      ctx.moveTo(C - wI, C);
+      ctx.quadraticCurveTo(C, C - hI * 2, C + wI, C);
+      ctx.quadraticCurveTo(C, C + hI * 2, C - wI, C);
+      ctx.closePath();
       ctx.stroke();
+      ctx.beginPath(); ctx.arc(C, C, S * 0.05, 0, Math.PI * 2); ctx.fill();
+      line(C + S * 0.04, C + hI, C + S * 0.04, C + hI + S * 0.14);
+      line(C + S * 0.04, C + hI + S * 0.14, C - S * 0.04, C + hI + S * 0.2);
     }
   } else {
-    // 螺旋＋橫向刻痕，像岩畫
+    // —— 岩畫螺旋＋刻痕 ——
     ctx.beginPath();
     let r = S * 0.03, a = 0;
-    ctx.moveTo(S / 2 + Math.cos(a) * r, S / 2 + Math.sin(a) * r);
-    const turns = 2.2 + Math.random() * 1.6;
+    ctx.moveTo(C + Math.cos(a) * r, C + Math.sin(a) * r);
+    const turns = rnd(2.2, 3.6);
     for (let i = 0; i <= 90; i++) {
       a = (i / 90) * turns * Math.PI * 2;
       r = S * 0.03 + (i / 90) * (S / 2 - m - S * 0.03);
-      ctx.lineTo(S / 2 + Math.cos(a) * r, S / 2 + Math.sin(a) * r);
+      ctx.lineTo(C + Math.cos(a) * r, C + Math.sin(a) * r);
     }
     ctx.stroke();
     const marks = 2 + Math.floor(Math.random() * 2);
     for (let i = 0; i < marks; i++) {
-      const y = S * (0.28 + Math.random() * 0.44);
-      const w = S * (0.1 + Math.random() * 0.12);
+      const y = S * rnd(0.28, 0.72);
+      const w = S * rnd(0.1, 0.22);
       const x = Math.random() > 0.5 ? S * 0.16 : S * 0.84;
-      ctx.beginPath();
-      ctx.moveTo(x - w / 2, y);
-      ctx.lineTo(x + w / 2, y);
-      ctx.stroke();
+      line(x - w / 2, y, x + w / 2, y);
     }
   }
+
+  // 石碑角框：四個角各刻一個 L 形記號
+  if (Math.random() < 0.4) {
+    ctx.save();
+    ctx.lineWidth = S * 0.02;
+    const e = S * 0.1, L = S * 0.1;
+    [[e, e, 1, 1], [S - e, e, -1, 1], [e, S - e, 1, -1], [S - e, S - e, -1, -1]].forEach(([px, py, sx, sy]) => {
+      ctx.beginPath(); ctx.moveTo(px + sx * L, py); ctx.lineTo(px, py); ctx.lineTo(px, py + sy * L); ctx.stroke();
+    });
+    ctx.restore();
+  }
+
   drawRuneCracks(ctx, S);
   ctx.restore();
 }
@@ -3468,7 +6104,7 @@ function buildVoidCreature() {
   });
 
   // 古文明符文：程序畫出來的貼圖，共用幾張，每顆符文是一塊面片
-  voidRuneTextures = createRuneTextures(14);
+  voidRuneTextures = createRuneTextures(20);
   const runeGeo = new THREE.PlaneGeometry(1, 1);
   const runeCount = 46;
   const runeOuterR = 7.0;
@@ -4011,6 +6647,56 @@ const SINS_FRESNEL_VERT = `
   }
 `;
 
+// 傲慢的玻璃外殼：刻面平面法線（用螢幕導數算）＋ 視角相關的邊緣亮光 ＋ 固定光源的刻面高光 ＋ 旋轉探照掃過時某些刻面金光閃爍
+const PRIDE_GLASS_FRAG = `
+  uniform float uTime;
+  uniform float uFrenzy;
+  uniform float uPhase;
+  uniform float uMode;   // 0 外殼正面／1 外殼背面／2 內層殼
+  varying vec2 vUv;
+  varying vec3 vNormalV;
+  varying vec3 vViewPos;
+  varying vec3 vLocal;
+  void main() {
+    vec3 V = normalize(-vViewPos);
+    vec3 fn = normalize(cross(dFdx(vViewPos), dFdy(vViewPos)));
+    if (dot(fn, V) < 0.0) fn = -fn;
+    float ndv = clamp(dot(fn, V), 0.0, 1.0);
+    float fres = pow(1.0 - ndv, 2.5);
+    vec3 R = reflect(-V, fn);
+    float s1 = pow(max(dot(R, normalize(vec3(-0.5, 0.8, 0.6))), 0.0), 14.0) * 0.7;
+    float s2 = pow(max(dot(R, normalize(vec3(0.7, 0.3, -0.5))), 0.0), 12.0) * 0.7;
+    vec3 sweep = normalize(vec3(sin(uTime * 0.5 + uPhase), 0.35, cos(uTime * 0.5 + uPhase)));
+    float g = smoothstep(0.82, 0.98, dot(fn, sweep));                       // 正對掃光方向的刻面會突然亮起
+    vec3 irid = 0.5 + 0.5 * cos(6.2831 * (ndv * 1.2 + vec3(0.0, 0.33, 0.67) + uPhase));
+    vec3 tint = uMode > 1.5 ? vec3(0.78, 0.86, 1.0) : (uMode > 0.5 ? vec3(0.55, 0.65, 0.85) : vec3(0.85, 0.93, 1.0));
+    // 霧面：整體覆一層乳白霧、表面細顆粒讓反光不那麼銳利
+    float grain = fract(sin(dot(floor(vLocal * 70.0), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    vec3 col = tint * 0.18 + vec3(0.80, 0.88, 1.0) * 0.10 + fres * mix(vec3(0.85, 0.92, 1.0), irid, 0.5) * 0.85;
+    col *= 0.94 + 0.12 * grain;
+    col += (s1 + s2) * vec3(1.0, 0.97, 0.9) * 1.4;
+    col += g * vec3(1.0, 0.82, 0.45) * (1.3 + uFrenzy);
+    float alpha = 0.20 + fres * 0.40 + (s1 + s2) * 0.7 + g * 0.7 + (grain - 0.5) * 0.05;
+    if (uMode > 0.5 && uMode < 1.5) alpha *= 0.7;
+    gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.95));
+    #include <tonemapping_fragment>
+    #include <encodings_fragment>
+  }
+`;
+function createPrideGlassMaterial(mode, phase, side) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uFrenzy: { value: 0 }, uPhase: { value: phase || 0 }, uMode: { value: mode } },
+    vertexShader: SINS_FRESNEL_VERT,
+    fragmentShader: PRIDE_GLASS_FRAG,
+    transparent: true,
+    depthWrite: false,
+    side: side == null ? THREE.FrontSide : side,
+    extensions: { derivatives: true },
+  });
+}
+
+
+
 // —— 貪婪：爪管能量脈衝（綠翡翠底 + 金光帶流向爪尖）——
 const GREED_CLAW_FRAG = `
   uniform float uTime;
@@ -4072,40 +6758,49 @@ const ENVY_EYE_FRAG = `
     float ang = atan(dir.y, dir.x);
     float rad = acos(clamp(face, -1.0, 1.0));
 
-    // 巩膜（眼白）：象牙白，血絲是向虹膜匯聚的赤紅細線（整數倍角頻率，球面無接縫）
-    vec3 sclera = vec3(0.93, 0.90, 0.85);
+    // 鞏膜：象牙白，離虹膜越遠越帶黃、略暗（球體立體感）；血絲＝向虹膜匯聚的赤紅細線＋不規則細支
+    vec3 sclera = mix(vec3(0.93, 0.90, 0.85), vec3(0.84, 0.76, 0.64), smoothstep(0.5, -0.3, face));
+    sclera *= 0.92 + 0.10 * envyNoise(vec2(ang * 5.0, face * 9.0));
     float wob1 = envyNoise(vec2(face * 5.0, 1.3));
     float wob2 = envyNoise(vec2(face * 9.0, 4.7));
     float v1 = sin(ang * 13.0 + wob1 * 7.0);
     float v2 = sin(ang * 27.0 + wob2 * 5.0 + 2.1);
     float veinLine = 1.0 - smoothstep(0.0, 0.13, abs(v1));
     veinLine = max(veinLine, (1.0 - smoothstep(0.0, 0.09, abs(v2))) * 0.55);
+    float fineV = 1.0 - smoothstep(0.0, 0.07, abs(envyNoise(vec2(ang * 7.0 + face * 3.0, face * 16.0)) - 0.5));
+    veinLine = max(veinLine, fineV * 0.45);
     float veinMask = smoothstep(0.60, 0.40, face) * smoothstep(0.0, 0.18, face);
-    sclera = mix(sclera, vec3(0.76, 0.11, 0.13), veinLine * veinMask * 0.95);
+    sclera = mix(sclera, vec3(0.72, 0.10, 0.12), veinLine * veinMask * 0.9);
 
-    // 虹膜：赤紅放射狀纖維，外圈亮環（角膜緣）
+    // 虹膜：赤紅放射纖維＋隱窩（暗細紋）＋瞳孔緣淺色環（collarette）＋外緣暗環（limbal ring）
     float irisM = smoothstep(0.54, 0.64, face);
-    float fib = 0.52 + 0.48 * sin(ang * 26.0 + rad * 7.0);
-    vec3 iris = mix(vec3(0.40, 0.02, 0.05), vec3(0.96, 0.17, 0.12), fib);
-    iris += vec3(1.0, 0.50, 0.32) * smoothstep(0.72, 0.56, rad * 1.4) * 0.30;
+    float fib = 0.52 + 0.48 * sin(ang * 26.0 + rad * 7.0 + envyNoise(vec2(ang * 9.0, rad * 6.0)) * 3.0);
+    vec3 iris = mix(vec3(0.34, 0.015, 0.04), vec3(0.92, 0.16, 0.10), fib);
+    float crypt = smoothstep(0.55, 0.9, envyNoise(vec2(ang * 11.0, rad * 14.0)));
+    iris *= 1.0 - 0.45 * crypt;
+    float collar = exp(-pow((face - 0.80) / 0.035, 2.0));
+    iris = mix(iris, vec3(1.0, 0.55, 0.28), collar * 0.55);
+    iris *= mix(0.30, 1.0, smoothstep(0.55, 0.68, face));
 
-    // 瞳孔：深邃近黑
-    float pupilM = smoothstep(0.89, 0.93, face);
-    vec3 pupil = vec3(0.035, 0.006, 0.012);
-
-    // 角膜緣亮環：眼白與虹膜交界
-    float limbus = smoothstep(0.48, 0.55, face) * (1.0 - smoothstep(0.55, 0.64, face));
+    // 瞳孔：深邃近黑，邊緣隨時間極輕微地縮放（活著的感覺）
+    float pr = 0.90 + 0.012 * sin(uTime * 0.8);
+    float pupilM = smoothstep(pr - 0.02, pr + 0.02, face);
+    vec3 pupil = vec3(0.020, 0.004, 0.008);
 
     vec3 col = sclera;
     col = mix(col, iris, irisM);
     col = mix(col, pupil, pupilM);
-    col += vec3(1.0, 0.34, 0.24) * limbus * 0.40;
+
+    // 濕潤感：鞏膜上一道寬而淡的高光（虹膜上的亮點交給角膜層）
+    vec3 Nn = normalize(vNormalV), Vv = normalize(-vViewPos);
+    float wet = pow(max(dot(reflect(-normalize(vec3(-0.4, 0.6, 0.7)), Nn), Vv), 0.0), 45.0) * (1.0 - irisM) * 0.35;
+    col += vec3(1.0, 0.97, 0.92) * wet;
 
     // ---- 光影材質（不動）：移動掃描高光 + fresnel 邊緣光 ----
     float scan = smoothstep(0.10, 0.0, abs(vLocal.y * 2.6 - sin(uTime * 1.2) * 0.3));
     col += vec3(1.0, 0.72, 0.62) * scan * (0.24 + uFrenzy * 0.35);
     float fres = pow(1.0 - ndv, 2.5);
-    col += vec3(1.0, 0.42, 0.38) * fres * 0.55;
+    col += vec3(1.0, 0.42, 0.38) * fres * 0.38;
 
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
@@ -4117,6 +6812,32 @@ function createEnvyEyeMaterial() {
     uniforms: { uTime: { value: 0 }, uFrenzy: { value: 0 } },
     vertexShader: SINS_FRESNEL_VERT,
     fragmentShader: ENVY_EYE_FRAG,
+  });
+}
+
+// 角膜：虹膜上方微凸的透明層，只疊加濕潤的高光（視窗般的亮點）與極淡的邊緣反光
+const ENVY_CORNEA_FRAG = `
+  varying vec2 vUv;
+  varying vec3 vNormalV;
+  varying vec3 vViewPos;
+  varying vec3 vLocal;
+  void main() {
+    vec3 N = normalize(vNormalV), V = normalize(-vViewPos);
+    vec3 R = reflect(-V, N);
+    float s1 = pow(max(dot(R, normalize(vec3(-0.35, 0.55, 0.75))), 0.0), 260.0) * 3.0;
+    float s2 = pow(max(dot(R, normalize(vec3(0.5, -0.2, 0.8))), 0.0), 60.0) * 0.5;
+    float fres = pow(1.0 - abs(dot(N, V)), 3.0);
+    vec3 col = vec3(1.0, 0.96, 0.90) * s1 + vec3(1.0, 0.70, 0.50) * s2 + vec3(0.9, 0.5, 0.5) * fres * 0.22;
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+function createEnvyCorneaMaterial() {
+  return new THREE.ShaderMaterial({
+    vertexShader: SINS_FRESNEL_VERT,
+    fragmentShader: ENVY_CORNEA_FRAG,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
   });
 }
 
@@ -4225,6 +6946,124 @@ function createGhostFire() {
   return grp;
 }
 
+// —— 慾（再設計）：纏縛螺旋——鋸齒緞帶織成的籠，中心是一顆搏動的暗紅核；邊緣發熱、會在心跳時收緊 ——
+const LUST_SNARE_FRAG = `
+  uniform float uTime;
+  uniform float uFrenzy;
+  uniform float uPhase;
+  varying vec2 vUv;
+  varying vec3 vNormalV;
+  varying vec3 vViewPos;
+  varying vec3 vLocal;
+  void main() {
+    float t = vUv.x;
+    float edge = smoothstep(0.55, 1.0, abs(vUv.y - 0.5) * 2.0);
+    vec3 base = mix(vec3(0.12, 0.008, 0.05), vec3(0.30, 0.03, 0.13), t);
+    float p1 = fract(t - uTime * 0.30 + uPhase);
+    float thump = exp(-12.0 * abs(p1 - 0.5));
+    thump += 0.6 * exp(-14.0 * abs(fract(t - uTime * 0.30 + uPhase + 0.14) - 0.5));
+    float fres = pow(1.0 - abs(dot(normalize(vNormalV), normalize(-vViewPos))), 2.0);
+    vec3 col = base;
+    col += vec3(1.0, 0.22, 0.55) * edge * (0.5 + thump * 0.8);                    // 鋸齒邊緣發熱
+    col += vec3(0.95, 0.25, 0.60) * thump * 0.3 * (0.8 + uFrenzy * 0.7);          // 心跳脈衝沿帶身往頂端傳
+    col += vec3(0.70, 0.15, 0.40) * fres * 0.28;
+    gl_FragColor = vec4(col, 1.0);
+    #include <tonemapping_fragment>
+    #include <encodings_fragment>
+  }
+`;
+function createLustSnareMaterial(phase) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uFrenzy: { value: 0 }, uPhase: { value: phase } },
+    vertexShader: SINS_FRESNEL_VERT,
+    fragmentShader: LUST_SNARE_FRAG,
+    side: THREE.DoubleSide,
+  });
+}
+
+const LUST_CORE_FRAG = `
+  uniform float uTime;
+  uniform float uFrenzy;
+  uniform float uPhase;
+  uniform float uBeat;
+  varying vec2 vUv;
+  varying vec3 vNormalV;
+  varying vec3 vViewPos;
+  varying vec3 vLocal;
+  float h3(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+  float n3(vec3 p) {
+    vec3 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
+               mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z);
+  }
+  void main() {
+    float ndv = abs(dot(normalize(vNormalV), normalize(-vViewPos)));
+    float n = n3(vLocal * 5.0 + vec3(0.0, uTime * 0.15, 0.0));
+    float vein = smoothstep(0.07, 0.0, abs(n - 0.5));
+    vec3 col = vec3(0.20, 0.01, 0.07) * (0.7 + 0.6 * n);
+    col += vec3(1.0, 0.20, 0.50) * vein * (0.9 + uBeat * 1.6 + uFrenzy * 0.6);       // 血管般的亮脈，隨心跳增亮
+    col += vec3(0.9, 0.12, 0.35) * pow(1.0 - ndv, 2.0) * (0.5 + uBeat * 0.9);
+    col += vec3(0.5, 0.05, 0.18) * (0.35 + uBeat * 0.5);
+    gl_FragColor = vec4(col, 1.0);
+    #include <tonemapping_fragment>
+    #include <encodings_fragment>
+  }
+`;
+function createLustCoreMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uFrenzy: { value: 0 }, uPhase: { value: 0 }, uBeat: { value: 0 } },
+    vertexShader: SINS_FRESNEL_VERT,
+    fragmentShader: LUST_CORE_FRAG,
+  });
+}
+
+const LUST_BLADE_FRAG = `
+  uniform float uTime;
+  uniform float uFrenzy;
+  uniform float uPhase;
+  varying vec2 vUv;
+  varying vec3 vNormalV;
+  varying vec3 vViewPos;
+  varying vec3 vLocal;
+  void main() {
+    float t = vUv.x;
+    float ndv = abs(dot(normalize(vNormalV), normalize(-vViewPos)));
+    vec3 col = mix(vec3(0.10, 0.005, 0.04), vec3(0.28, 0.02, 0.12), t);
+    float flow = fract(t - uTime * 0.25 + uPhase);
+    col += vec3(1.0, 0.25, 0.55) * exp(-10.0 * abs(flow - 0.5)) * 0.45 * (0.8 + uFrenzy * 0.7);
+    col += vec3(1.0, 0.22, 0.52) * pow(1.0 - ndv, 2.4) * (0.9 + t * 0.6);           // 刃緣泛熱，越近尖端越亮
+    gl_FragColor = vec4(col, 1.0);
+    #include <tonemapping_fragment>
+    #include <encodings_fragment>
+  }
+`;
+function createLustBladeMaterial(phase) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uFrenzy: { value: 0 }, uPhase: { value: phase } },
+    vertexShader: SINS_FRESNEL_VERT,
+    fragmentShader: LUST_BLADE_FRAG,
+  });
+}
+
+// 鋸齒緞帶：沿 pts 展開，寬度隔點交錯＝一排尖齒；uv.x 沿長度、uv.y 沿寬度
+function createSerratedRibbonGeometry(pts, halfBase, halfTooth) {
+  const verts = [], uvs = [], idx = [];
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const p = pts[i], w = (i % 2 ? halfTooth : halfBase);
+    verts.push(p.x, p.y + w, p.z, p.x, p.y - w, p.z);
+    uvs.push(i / (n - 1), 1, i / (n - 1), 0);
+  }
+  for (let i = 0; i < n - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
 // —— 慾：螺旋心跳脈衝光（雙節拍往頂端傳）＋花瓣 fresnel 幽光 ——
 const LUST_HELIX_FRAG = `
   uniform float uTime;
@@ -4321,6 +7160,103 @@ function createGluttonyMawMaterial(phase) {
     uniforms: { uTime: { value: 0 }, uFrenzy: { value: 0 }, uPhase: { value: phase } },
     vertexShader: SINS_FRESNEL_VERT,
     fragmentShader: GLUTTONY_MAW_FRAG,
+    side: THREE.DoubleSide,
+  });
+}
+
+// —— 怠慢（再設計）：滯重沉降者——層層堆疊的灰岩軟體，縫隙滲出暗紫幽光 ——
+const SLOTH_STRATA_FRAG = `
+  uniform float uTime;
+  uniform float uFrenzy;
+  uniform float uPhase;
+  varying vec2 vUv;
+  varying vec3 vNormalV;
+  varying vec3 vViewPos;
+  varying vec3 vLocal;
+  float h3(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+  float n3(vec3 p) {
+    vec3 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
+               mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z);
+  }
+  void main() {
+    vec3 N = normalize(vNormalV);
+    float ndv = abs(dot(N, normalize(-vViewPos)));
+    vec3 L = normalize(vec3(-0.4, 0.8, 0.5));
+    float diff = max(dot(N, L), 0.0) * 0.55 + 0.35;
+    // 地層條帶：每一層明度不同，邊界被噪聲扭曲
+    float warp = n3(vec3(vLocal.x * 1.2, vLocal.y * 0.5, vLocal.z * 1.2)) * 0.9;
+    float yy = (vLocal.y + warp) * 3.2;
+    float band = fract(yy);
+    float tone = h3(vec3(floor(yy), 3.1, 7.7));
+    vec3 base = mix(vec3(0.045, 0.040, 0.055), vec3(0.16, 0.14, 0.18), tone * 0.7);
+    base *= 0.75 + 0.5 * n3(vLocal * 14.0);
+    base += vec3(0.04, 0.035, 0.05) * smoothstep(0.85, 1.0, band);       // 層緣微亮
+    float ash = smoothstep(1.2, 2.2, vLocal.y) * smoothstep(0.35, 0.7, n3(vLocal * 5.0));
+    base = mix(base, vec3(0.30, 0.29, 0.31), ash * 0.5);                  // 上緣落灰
+    vec3 col = base * diff;
+    // 岩縫裡滲出的暗紫幽光（慢慢明滅）
+    float cr = n3(vLocal * vec3(2.6, 2.0, 2.6) + 3.7);
+    float crack = smoothstep(0.035, 0.0, abs(cr - 0.5));
+    float pulse = 0.55 + 0.45 * sin(uTime * 0.6 + vLocal.y * 2.0 + uPhase);
+    col += vec3(0.62, 0.16, 0.80) * crack * pulse * (0.9 + uFrenzy);
+    // 正面一道縱向裂口，像緩慢呼吸的傷口
+    float fis = smoothstep(0.05, 0.0, abs(vLocal.x - 0.12 + 0.07 * sin(vLocal.y * 5.0)))
+              * step(0.15, vLocal.z) * smoothstep(0.5, 0.9, vLocal.y) * (1.0 - smoothstep(1.9, 2.2, vLocal.y));
+    col += vec3(0.95, 0.25, 0.95) * fis * (0.7 + 0.3 * sin(uTime * 0.8)) * (1.0 + uFrenzy * 0.8);
+    col += vec3(0.35, 0.12, 0.55) * pow(1.0 - ndv, 3.0) * 0.5;           // 暗紫輪廓光
+    gl_FragColor = vec4(col, 1.0);
+    #include <tonemapping_fragment>
+    #include <encodings_fragment>
+  }
+`;
+function createSlothStrataMaterial(phase) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uFrenzy: { value: 0 }, uPhase: { value: phase } },
+    vertexShader: SINS_FRESNEL_VERT,
+    fragmentShader: SLOTH_STRATA_FRAG,
+    side: THREE.DoubleSide,
+  });
+}
+
+// —— 怠慢（重做）：沉睡的重物者——暗紫灰的軟身，帶灰塵／苔蘚斑塊與柔和的紫色輪廓光 ——
+const SLOTH_BODY_FRAG = `
+  uniform float uTime;
+  uniform float uFrenzy;
+  uniform float uPhase;
+  varying vec2 vUv;
+  varying vec3 vNormalV;
+  varying vec3 vViewPos;
+  varying vec3 vLocal;
+  float h3(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+  float n3(vec3 p) {
+    vec3 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
+               mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z);
+  }
+  void main() {
+    vec3 N = normalize(vNormalV);
+    float ndv = abs(dot(N, normalize(-vViewPos)));
+    vec3 L = normalize(vec3(-0.4, 0.8, 0.5));
+    float diff = max(dot(N, L), 0.0) * 0.6 + 0.4;
+    vec3 base = mix(vec3(0.20, 0.17, 0.26), vec3(0.36, 0.32, 0.45), smoothstep(0.0, 1.4, vLocal.y));
+    float dust = n3(vLocal * 6.0);
+    base = mix(base, vec3(0.33, 0.35, 0.29), smoothstep(0.60, 0.82, dust) * 0.5);   // 灰塵／苔蘚斑
+    base *= 0.86 + 0.28 * n3(vLocal * 20.0);                                        // 細顆粒
+    vec3 col = base * diff;
+    col += vec3(0.50, 0.38, 0.78) * pow(1.0 - ndv, 3.0) * (0.45 + uFrenzy * 0.5);   // 柔和紫色輪廓光
+    gl_FragColor = vec4(col, 1.0);
+    #include <tonemapping_fragment>
+    #include <encodings_fragment>
+  }
+`;
+function createSlothBodyMaterial(phase) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uFrenzy: { value: 0 }, uPhase: { value: phase } },
+    vertexShader: SINS_FRESNEL_VERT,
+    fragmentShader: SLOTH_BODY_FRAG,
     side: THREE.DoubleSide,
   });
 }
@@ -4548,15 +7484,60 @@ function buildSinsColony() {
     grp.userData = { sinKey: 'pride', basePos: new THREE.Vector3(0, 10.2, -10) };
 
     // 帝王配色：核心帝王紫燦光（呼吸脈動）＋ 王金冠環／拱弧 ＋ 鑽白八星 ＋ 頂珠紅寶石
-    const coreMat = createPrideGlowMaterial({ color: 0x3b0764, emissive: 0x7e22ce, intensity: 0.38, roughness: 0.42, metalness: 0.25 });
+    const gemMat = createPrideGlowMaterial({ color: 0xfff2c8, emissive: 0xffd36b, intensity: 0.9, roughness: 0.08, metalness: 0.2 });   // 玻璃內的傲慢核心（呼吸脈動由它驅動）
     const goldMat = createPrideGlowMaterial({ color: 0xd4af37, emissive: 0x574000, intensity: 0.4, roughness: 0.22, metalness: 0.9 });
     const diamondMat = createPrideGlowMaterial({ color: 0xf8fafc, emissive: 0xcfe4ff, intensity: 0.5, roughness: 0.06, metalness: 0.1 });
     const rubyMat = createPrideGlowMaterial({ color: 0xa50034, emissive: 0xe0115f, intensity: 0.55, roughness: 0.12, metalness: 0.2 });
-    const glowMat = coreMat; // animate() 只驅動這個的呼吸脈動
+    const glowMat = gemMat; // animate() 只驅動這個的呼吸脈動
 
+    // 外殼：薄玻璃（單層殼，正面＋背面）；刻面隨視角反光、被掃光掃到時金光閃爍，表面帶一點霧面
     const coreGeo = new THREE.OctahedronGeometry(0.85, 1);
-    const core = new THREE.Mesh(coreGeo, coreMat);
+    const glassMats = [
+      createPrideGlassMaterial(0, 0.0, THREE.FrontSide),
+      createPrideGlassMaterial(1, 0.9, THREE.BackSide),
+    ];
+    const core = new THREE.Mesh(coreGeo, glassMats[0]);
+    const coreBack = new THREE.Mesh(coreGeo, glassMats[1]);
+    coreBack.renderOrder = 1; core.renderOrder = 2;
+    core.add(coreBack);
+    core.add(new THREE.LineSegments(new THREE.EdgesGeometry(coreGeo, 20), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4, depthWrite: false })));
     grp.add(core);
+
+    // 玻璃裡的傲慢核心（全部在半徑 0.5 內，不超出外殼 0.78~0.85）：
+    //   正中是自我欣賞的長鑽，鑽頂戴一頂迷你王冠，外圍三道金環像陀螺儀般各自旋轉（環上各嵌一顆寶石）
+    const inner = new THREE.Group();
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0), gemMat);
+    gem.scale.set(1, 1.5, 1);
+    inner.add(gem);
+    const innerGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: createRadialGlowTexture('255,210,110'), transparent: true, opacity: 0.75,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    innerGlow.scale.set(1.0, 1.0, 1);
+    inner.add(innerGlow);
+    const miniCrown = new THREE.Group();
+    miniCrown.position.y = 0.33;
+    miniCrown.add(new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.012, 8, 20), goldMat)).rotation.x = Math.PI / 2;
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.1, 6), goldMat);
+      tip.position.set(0.1 * Math.cos(a), 0.05, 0.1 * Math.sin(a));
+      miniCrown.add(tip);
+    }
+    miniCrown.add(new THREE.Mesh(new THREE.OctahedronGeometry(0.03, 0), rubyMat)).position.y = 0.16;
+    inner.add(miniCrown);
+    const gyros = [];
+    [[0.30, 0, 0], [0.38, 0, 0], [0.46, 0, 0]].forEach(([r], k) => {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(r, 0.012, 8, 56), goldMat);
+      if (k === 0) ring.rotation.x = Math.PI / 2;
+      if (k === 2) ring.rotation.y = Math.PI / 2;
+      const bead = new THREE.Mesh(new THREE.OctahedronGeometry(0.035, 0), k === 1 ? rubyMat : diamondMat);
+      bead.position.set(r, 0, 0);
+      ring.add(bead);
+      inner.add(ring);
+      gyros.push(ring);
+    });
+    grp.add(inner);
 
     // 環冕：底座金環＋交替鑽白八星＋四道金拱弧匯於紅寶頂珠
     const crownGroup = new THREE.Group();
@@ -4610,7 +7591,7 @@ function buildSinsColony() {
     hit.userData = { sinKey: 'pride' };
     grp.add(hit);
 
-    sinCreatures.pride = { group: grp, core, crownGroup, halo1, halo2, hit, glowMat };
+    sinCreatures.pride = { group: grp, core, glassMats, inner, gyros, miniCrown, crownGroup, halo1, halo2, hit, glowMat };
     sinsGroup.add(grp);
   }
 
@@ -4626,6 +7607,19 @@ function buildSinsColony() {
     const coreMat = new THREE.MeshMatcapMaterial({ matcap: emeraldMatcap });
     const core = new THREE.Mesh(coreGeo, coreMat);
     grp.add(core);
+
+    // 金色 matcap：關節、爪尖、金幣、腰環共用
+    const goldMatcap = createSinsMatcap('#fffbeb', '#fde047', '#b45309', '#451a03');
+    const goldMat = new THREE.MeshMatcapMaterial({ matcap: goldMatcap });
+
+    // 兩道交錯的金腰環
+    const collar = new THREE.Group();
+    [0, Math.PI / 2.6].forEach((tilt) => {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.78, 0.028, 10, 56), goldMat);
+      ring.rotation.x = Math.PI / 2 + tilt;
+      collar.add(ring);
+    });
+    grp.add(collar);
 
     const claws = [];
     const tipMat = new THREE.MeshBasicMaterial({
@@ -4654,7 +7648,55 @@ function buildSinsColony() {
       tipOrb.position.copy(pts[3]);
       clawMesh.userData.tipOrb = tipOrb;
       clawMesh.add(tipOrb);
+
+      // 金色關節（爪管上兩處）＋ 爪尖利爪，順著曲線末端方向
+      [0.35, 0.68].forEach((t, k) => {
+        const knuckle = new THREE.Mesh(new THREE.SphereGeometry(0.058 - k * 0.018, 12, 12), goldMat);
+        knuckle.position.copy(curve.getPoint(t));
+        clawMesh.add(knuckle);
+      });
+      const talon = new THREE.Mesh(new THREE.ConeGeometry(0.034, 0.24, 8), goldMat);
+      talon.position.copy(pts[3]);
+      talon.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), curve.getTangent(1).normalize());
+      talon.translateY(0.1);
+      clawMesh.add(talon);
     }
+
+    // 第二層小觸爪：夾在大爪之間、較短較細，讓輪廓更繁複
+    const claws2 = [];
+    for (let i = 0; i < 6; i++) {
+      const a = ((i + 0.5) / 6) * Math.PI * 2;
+      const pts2 = [
+        new THREE.Vector3(0.45 * Math.cos(a), -0.3, 0.45 * Math.sin(a)),
+        new THREE.Vector3(1.0 * Math.cos(a), 0.05, 1.0 * Math.sin(a)),
+        new THREE.Vector3(0.72 * Math.cos(a + 0.25), 0.5, 0.72 * Math.sin(a + 0.25)),
+        new THREE.Vector3(0.34 * Math.cos(a + 0.35), 0.38, 0.34 * Math.sin(a + 0.35)),
+      ];
+      const curve2 = new THREE.CatmullRomCurve3(pts2);
+      const c2 = new THREE.Mesh(createTaperedTubeGeometry(curve2, 22, 8, 0.05, 0.006), createGreedClawMaterial(i / 6 + 0.5));
+      const tip2 = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 10), tipMat);
+      tip2.position.copy(pts2[3]);
+      c2.add(tip2);
+      claws2.push(c2);
+      grp.add(c2);
+    }
+
+    // 吸積金幣：環繞翻轉、螺旋被吸向核心（InstancedMesh，一次繪製）
+    const coinCount = 28;
+    const coins = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.11, 0.11, 0.026, 18), goldMat, coinCount);
+    const coinData = [];
+    for (let i = 0; i < coinCount; i++) {
+      coinData.push({
+        r: 1.5 + Math.random() * 1.6,
+        theta: Math.random() * Math.PI * 2,
+        y: (Math.random() - 0.5) * 1.1,
+        speed: 0.012 + Math.random() * 0.02,
+        spin: 0.03 + Math.random() * 0.05,
+        rot: Math.random() * Math.PI * 2,
+      });
+    }
+    const coinDummy = new THREE.Object3D();
+    grp.add(coins);
 
     const pCount = 50;
     const pGeo = new THREE.BufferGeometry();
@@ -4684,7 +7726,7 @@ function buildSinsColony() {
     hit.userData = { sinKey: 'greed' };
     grp.add(hit);
 
-    sinCreatures.greed = { group: grp, core, claws, particles, pData, hit };
+    sinCreatures.greed = { group: grp, core, claws, claws2, collar, coins, coinData, coinDummy, particles, pData, hit };
     sinsGroup.add(grp);
   }
 
@@ -4769,6 +7811,13 @@ function buildSinsColony() {
     const eye = new THREE.Mesh(eyeGeo, eyeMat);
     grp.add(eye);
 
+    // 角膜：略大於眼球的凸起球冠，罩在虹膜上，負責濕潤的高光（球冠極點朝 +Z＝注視方向）
+    const corneaGeo = new THREE.SphereGeometry(0.392, 40, 24, 0, Math.PI * 2, 0, 1.08);
+    corneaGeo.rotateX(Math.PI / 2);
+    const cornea = new THREE.Mesh(corneaGeo, createEnvyCorneaMaterial());
+    cornea.renderOrder = 2;
+    eye.add(cornea);
+
     // 眼球的瞳孔與虹膜已由 ENVY_EYE_FRAG 直接畫在球面上，不再疊獨立 mesh
 
     // 嫉妒的環伺鬼火：五朵紅紫燐火，沿扭結外側緩慢環繞
@@ -4795,46 +7844,127 @@ function buildSinsColony() {
     sinsGroup.add(grp);
   }
 
-  // 5. 慾 (Lust) - 惑魅雙螺旋 (0, 2.4, 4.2)
+  // 5. 慾 (Lust) - 纏縛螺旋 (0, 2.5, 9.5)
+  // 設計（人類消失後才誕生的概念生物）：慾＝牽引與纏縛。鋸齒緞帶以兩正兩反的螺旋織成紡錘形的籠，
+  //   兩端收束在頂端與底端的節點上（不留懸空端）；籠中是一顆會雙拍搏動的暗紅核，每次心跳籠都會收緊；
+  //   底節點長出六片向上合攏的利刃花瓣，頂節點垂下三條帶光點的誘引絲。
   {
     const grp = new THREE.Group();
     grp.position.set(0, 2.5, 9.5);
     grp.userData = { sinKey: 'lust', basePos: new THREE.Vector3(0, 2.5, 9.5) };
+    const shape = new THREE.Group();
+    shape.scale.setScalar(0.66);   // 0.88 × 75%
+    grp.add(shape);
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    const H = 3.2, R = 0.9;
 
-    const helixGroup = new THREE.Group();
+    // 籠：四條鋸齒緞帶（兩條右旋、兩條左旋）。半徑沿高度呈紡錘形，兩端收成 0＝兩端都收進節點
+    const cage = new THREE.Group();
+    shape.add(cage);
+    const ribbonMats = [];
+    [[2.2, 0.0], [2.2, Math.PI], [-2.2, Math.PI / 2], [-2.2, Math.PI * 1.5]].forEach(([turns, ph], k) => {
+      const pts = [];
+      const N = 96;
+      for (let i = 0; i <= N; i++) {
+        const t = i / N;
+        const r = R * Math.pow(Math.sin(Math.PI * t), 0.75);
+        const a = turns * Math.PI * 2 * t + ph;
+        pts.push(new THREE.Vector3(r * Math.cos(a), (t - 0.5) * H, r * Math.sin(a)));
+      }
+      const mat = createLustSnareMaterial(k * 0.25);
+      ribbonMats.push(mat);
+      const rb = new THREE.Mesh(createSerratedRibbonGeometry(pts, 0.07, 0.17), mat);
+      rb.castShadow = true;
+      cage.add(rb);
+    });
+    // 兩端節點（緞帶在此匯聚）
+    const nodeMat = createLustBladeMaterial(0);
+    const apex = new THREE.Mesh(new THREE.SphereGeometry(0.17, 18, 14), nodeMat);
+    apex.position.y = H / 2;
+    const base = new THREE.Mesh(new THREE.SphereGeometry(0.2, 18, 14), nodeMat);
+    base.position.y = -H / 2;
+    shape.add(apex, base);
 
-    const pts1 = [], pts2 = [];
-    for (let t = -Math.PI * 2; t <= Math.PI * 2; t += 0.2) {
-      pts1.push(new THREE.Vector3(0.55 * Math.cos(t), t * 0.28, 0.55 * Math.sin(t)));
-      pts2.push(new THREE.Vector3(0.55 * Math.cos(t + Math.PI), t * 0.28, 0.55 * Math.sin(t + Math.PI)));
+    // 搏動的核
+    const coreMat = createLustCoreMaterial();
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.46, 40, 30), coreMat);
+    core.scale.set(1, 1.18, 1);
+    shape.add(core);
+    const aura = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: createRadialGlowTexture('255,40,120'), transparent: true, opacity: 0.55,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    aura.scale.set(4.2, 5.0, 1);
+    shape.add(aura);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: createRadialGlowTexture('255,60,140'), transparent: true, opacity: 0.22,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    halo.scale.set(8.5, 9.5, 1);
+    shape.add(halo);
+    const glowLight = new THREE.PointLight(0xff3d8a, 1.6, 15, 2);   // 真的會照亮周圍的粉紅光
+    shape.add(glowLight);
+
+    // 底部六片利刃花瓣：以底節點為樞紐向上合攏，像捕蠅的夾
+    const blades = [];
+    const bladeMats = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const pivot = new THREE.Group();
+      pivot.position.set(0, -H / 2, 0);
+      pivot.rotation.y = angle;
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0.45, -0.18, 0),
+        new THREE.Vector3(1.05, 0.15, 0),
+        new THREE.Vector3(1.38, 0.85, 0),
+        new THREE.Vector3(1.32, 1.55, 0),
+      ]);
+      const bm = createLustBladeMaterial(i * 0.16);
+      bladeMats.push(bm);
+      const blade = new THREE.Mesh(createTaperedTubeGeometry(curve, 28, 8, 0.15, 0.004), bm);
+      blade.castShadow = true;
+      pivot.add(blade);
+      pivot.userData = { baseZ: 0, phase: i * 0.9 };
+      shape.add(pivot);
+      blades.push(pivot);
     }
-    // 心跳脈衝光沿螺旋往頂端傳，兩股相位差半個節拍
-    const h1 = new THREE.Mesh(createTaperedTubeGeometry(new THREE.CatmullRomCurve3(pts1), 48, 8, 0.065, 0.02), createLustHelixMaterial(0.0));
-    const h2 = new THREE.Mesh(createTaperedTubeGeometry(new THREE.CatmullRomCurve3(pts2), 48, 8, 0.065, 0.02), createLustHelixMaterial(0.5));
-    helixGroup.add(h1);
-    helixGroup.add(h2);
-    grp.add(helixGroup);
 
-    // 圓潤花瓣裙：貝茲圓瓣取代尖錐
-    const petals = [];
-    const petalGeo = createSinPetalGeometry();
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
-      // fresnel 幽光花瓣：每瓣相位錯開，微光沿瓣面流動
-      const pet = new THREE.Mesh(petalGeo, createLustPetalMaterial(angle));
-      pet.position.set(0.9 * Math.cos(angle), 0, 0.9 * Math.sin(angle));
-      pet.rotation.y = angle;
-      pet.rotation.x = Math.PI / 2.6;
-      pet.userData = { baseRotX: pet.rotation.x, baseRotZ: pet.rotation.z, angle };
-      petals.push(pet);
-      grp.add(pet);
+    // 頂部三條誘引絲：從頂節點垂弧而出，尖端有發光點（拉住靠近的東西）
+    const lures = [];
+    const tips = [];
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2 + 0.5;
+      const pivot = new THREE.Group();
+      pivot.position.set(0, H / 2, 0);
+      pivot.rotation.y = angle;
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0.35, 0.55, 0),
+        new THREE.Vector3(1.0, 0.85, 0),
+        new THREE.Vector3(1.7, 0.45, 0),
+        new THREE.Vector3(2.0, -0.3, 0),
+      ]);
+      const lm = createLustBladeMaterial(i * 0.3);
+      bladeMats.push(lm);
+      pivot.add(new THREE.Mesh(createTaperedTubeGeometry(curve, 30, 6, 0.045, 0.012), lm));
+      const tip = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: createRadialGlowTexture('255,70,150'), transparent: true, opacity: 0.95,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      tip.scale.set(0.5, 0.5, 1);
+      tip.position.copy(curve.getPoint(1));
+      pivot.add(tip);
+      shape.add(pivot);
+      lures.push(pivot);
+      tips.push(tip);
     }
 
-    const hit = new THREE.Mesh(new THREE.SphereGeometry(1.6, 8, 8), new THREE.MeshBasicMaterial({ visible: false }));
+    const hit = new THREE.Mesh(new THREE.SphereGeometry(1.7, 8, 8), new THREE.MeshBasicMaterial({ visible: false }));
     hit.userData = { sinKey: 'lust' };
-    grp.add(hit);
+    shape.add(hit);
 
-    sinCreatures.lust = { group: grp, helixGroup, petals, hit };
+    sinCreatures.lust = { group: grp, shape, cage, core, coreMat, aura, halo, glowLight, blades, lures, tips, ribbonMats, bladeMats, nodeMat, hit };
     sinsGroup.add(grp);
   }
 
@@ -4899,188 +8029,162 @@ function buildSinsColony() {
     sinsGroup.add(grp);
   }
 
-  // 7. 怠慢 (Sloth) - 兜帽垂紗者 (-1.6, 0.02, 3.4)：漆黑袍身立於街道地面，長鬚貼地蔓延
+  // 7. 怠慢 (Sloth) - 滯重沉降者 (-1.6, 0.02, 3.4)
+  // 設計（人類消失後才誕生的概念生物，不模仿現有動物）：怠慢＝慣性與沉降的重量。
+  //   層層堆疊的灰岩軟體半陷進地面，肚腹垂掛一圈石筍利齒，兩條斷節的重臂以厚實的肩窩接在身上、拖在地上；
+  //   岩縫與正面裂口滲出暗紫幽光；周圍的灰燼碎片緩慢環繞，地面的重力圈不斷向它收縮。
   {
     const grp = new THREE.Group();
     grp.position.set(-1.6, 0.02, 3.4);
     grp.userData = { sinKey: 'sloth', basePos: new THREE.Vector3(-1.6, 0.02, 3.4) };
-
-    // 內層 group 負責整體縮放 80%；外層 grp.scale 留給「點選放大／狂暴」脈動
     const shape = new THREE.Group();
-    shape.scale.setScalar(0.8);
+    shape.scale.setScalar(0.9);   // 外層 grp.scale 留給點選放大／狂暴
     grp.add(shape);
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    const bodyMat = createSlothStrataMaterial(0);
+    const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-    const cloakMat = createSlothCloakMaterial(0);
-
-    // 袍身：Lathe 輪廓——腳端收、腰身細、肩部張開，到頸部收束（頭顱另外做成獨立橢球）
-    const bodyProfile = [
-      new THREE.Vector2(0.05, 0.00),
-      new THREE.Vector2(0.26, 0.05),
-      new THREE.Vector2(0.31, 0.26),
-      new THREE.Vector2(0.31, 0.80),
-      new THREE.Vector2(0.29, 1.35),
-      new THREE.Vector2(0.30, 1.90),
-      new THREE.Vector2(0.38, 2.20),
-      new THREE.Vector2(0.34, 2.38),
-      new THREE.Vector2(0.25, 2.52),
-      new THREE.Vector2(0.16, 2.60),
-    ];
-    const body = new THREE.Mesh(createDrapedBodyGeometry(bodyProfile, 44, 0.038, 9), cloakMat);
-    body.castShadow = true;
+    // 身體：球體變形——肩部寬、層層外突的地層邊、下緣外擴、頂端鋸齒、整體向右歪
+    const bodyShape = (y, ang) => {
+      const shoulder = Math.exp(-Math.pow((y - 0.1) / 0.75, 2));
+      let rr = 0.78 + 0.28 * shoulder;
+      rr *= 1 + 0.07 * (Math.floor((y + 1) * 3.5) % 2 ? 1 : -0.25);
+      rr *= 1 + 0.25 * sstep(0.1, -0.9, y);
+      return rr;
+    };
+    const bg = new THREE.SphereGeometry(1, 64, 48);
+    const bp = bg.attributes.position;
+    for (let i = 0; i < bp.count; i++) {
+      const x = bp.getX(i), y = bp.getY(i), z = bp.getZ(i);
+      const ang = Math.atan2(z, x);
+      const rr = bodyShape(y, ang);
+      const crown = 0.14 * Math.sin(ang * 5) * sstep(0.6, 1.0, y);
+      bp.setXYZ(i, x * rr * 1.25 + 0.28 * sstep(-0.3, 1.0, y), (y + 1) * 1.15 - 0.25 + crown, z * rr * 1.1);
+    }
+    bg.computeVertexNormals();
+    const body = new THREE.Mesh(bg, bodyMat);
+    body.castShadow = true; body.receiveShadow = true;
     shape.add(body);
+    const radiusAt = (Y) => bodyShape((Y + 0.25) / 1.15 - 1, 0) * 1.2;
 
-    // 頭顱：獨立的前傾長橢球（參考圖的光滑兜帽頭，不是尖帽）
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 36, 24), cloakMat);
-    head.scale.set(0.95, 1.34, 0.98);
-    head.position.set(0, 2.92, 0.02);
-    head.rotation.x = 0.16;
-    head.castShadow = true;
-    shape.add(head);
-
-    // 兜帽：自頸後翻上包住顱頂、再向後拉出一個尖尾（參考圖兜帽後方的尖突）
-    const hoodGroup = new THREE.Group();
-    hoodGroup.position.set(0, 2.60, -0.10);
-    hoodGroup.rotation.x = -0.06;
-    shape.add(hoodGroup);
-
-    const cowlProfile = [
-      new THREE.Vector2(0.11, 0.00),
-      new THREE.Vector2(0.25, 0.08),
-      new THREE.Vector2(0.34, 0.24),
-      new THREE.Vector2(0.38, 0.42),
-      new THREE.Vector2(0.37, 0.58),
-      new THREE.Vector2(0.31, 0.70),
-      new THREE.Vector2(0.20, 0.79),
-      new THREE.Vector2(0.07, 0.84),
-    ];
-    const cowl = new THREE.Mesh(createDrapedBodyGeometry(cowlProfile, 40, 0.024, 7), cloakMat);
-    cowl.position.set(0, 0.02, -0.14);
-    cowl.scale.set(1.0, 1.0, 1.10);
-    cowl.castShadow = true;
-    hoodGroup.add(cowl);
-
-    // 帽尖：自後腦往後下方拉出的布尖（用漸細管，收在帽布內不出切邊）
-    const hoodTip = new THREE.Mesh(
-      createTaperedTubeGeometry(
-        new THREE.CatmullRomCurve3([
-          new THREE.Vector3(0.00, 0.70, -0.16),
-          new THREE.Vector3(-0.05, 0.56, -0.40),
-          new THREE.Vector3(0.03, 0.38, -0.54),
-          new THREE.Vector3(0.10, 0.22, -0.56),
-        ]),
-        28, 8, 0.17, 0.012
-      ),
-      cloakMat
-    );
-    hoodTip.castShadow = true;
-    hoodGroup.add(hoodTip);
-
-    // 顏面：貼在頭顱前方的暗色凹陷（兜帽下的空洞），赤瞳浮在它前面
-    const face = new THREE.Mesh(
-      new THREE.SphereGeometry(0.24, 24, 18),
-      new THREE.MeshStandardMaterial({ color: 0x030208, roughness: 0.9, metalness: 0.0 })
-    );
-    face.position.set(0, 2.86, 0.215);
-    face.scale.set(0.88, 1.12, 0.42);
-    shape.add(face);
-
-    // 赤瞳：兩顆細長發光縫，嵌在顏面凹槽裡
-    const eyeTex = createRadialGlowTexture('255,80,100');
-    const eyes = [];
-    [-0.082, 0.082].forEach((ex) => {
-      const eye = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: eyeTex, color: 0xff3049, transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, opacity: 1.0,
-      }));
-      eye.scale.set(0.24, 0.14, 1);
-      eye.position.set(ex, 2.88, 0.325);
-      shape.add(eye);
-      eyes.push(eye);
-    });
-
-    // 左側大垂紗：自頭顱甩出、繞過左側再垂落地面的大片布幔（參考圖的主體量塊）
-    // 收束關鍵（對應使用者要求「頭尾收束到主體內」）：
-    //   首列與末列的 inner 邊鑽進頭顱／袍腳裡面 → 兩端都收進主體，不露懸空切邊
-    //   中段 inner 邊往內退 → 布幔與袍身之間留出空隙，正面看得出是「一片披在旁邊的布」
-    const capeRows = [
-      { y: 3.00, outer: [0.10, -0.06], inner: [0.04, -0.02] },
-      { y: 3.10, outer: [-0.34, -0.30], inner: [0.02, -0.10] },
-      { y: 2.96, outer: [-0.86, -0.54], inner: [-0.16, -0.24] },
-      { y: 2.60, outer: [-1.22, -0.70], inner: [-0.52, -0.34] },
-      { y: 2.15, outer: [-1.42, -0.74], inner: [-0.78, -0.34] },
-      { y: 1.60, outer: [-1.48, -0.62], inner: [-0.86, -0.26] },
-      { y: 1.05, outer: [-1.42, -0.40], inner: [-0.84, -0.14] },
-      { y: 0.60, outer: [-1.22, -0.14], inner: [-0.70, 0.00] },
-      { y: 0.34, outer: [-0.82, 0.10], inner: [-0.40, 0.08] },
-      { y: 0.24, outer: [-0.32, 0.08], inner: [-0.10, 0.04] },
-      { y: 0.20, outer: [-0.12, 0.02], inner: [-0.03, 0.01] },
-    ];
-    const cape = new THREE.Mesh(createDrapePanelGeometry(capeRows, 16), cloakMat);
-    cape.castShadow = true;
-    shape.add(cape);
-
-    // 右側垂紗：同樣頭尾收進主體、中段留縫的第二片較窄布幕
-    const cape2Rows = [
-      { y: 2.86, outer: [0.10, -0.24], inner: [0.04, -0.12] },
-      { y: 2.64, outer: [0.40, -0.46], inner: [0.06, -0.22] },
-      { y: 2.22, outer: [0.62, -0.54], inner: [0.22, -0.28] },
-      { y: 1.74, outer: [0.72, -0.50], inner: [0.34, -0.20] },
-      { y: 1.26, outer: [0.74, -0.34], inner: [0.38, -0.10] },
-      { y: 0.84, outer: [0.64, -0.14], inner: [0.34, 0.00] },
-      { y: 0.50, outer: [0.46, 0.04], inner: [0.20, 0.06] },
-      { y: 0.30, outer: [0.22, 0.08], inner: [0.06, 0.05] },
-      { y: 0.22, outer: [0.10, 0.02], inner: [0.02, 0.01] },
-    ];
-    const cape2 = new THREE.Mesh(createDrapePanelGeometry(cape2Rows, 14), cloakMat);
-    cape2.castShadow = true;
-    shape.add(cape2);
-
-    // 垂地長鬚：從腳底向四面貼地蔓延的細長墨色根鬚（參考圖的地面觸手）
-    const tentacles = [];
-    const TENT_COUNT = 26;
-    for (let i = 0; i < TENT_COUNT; i++) {
-      const angle = (i / TENT_COUNT) * Math.PI * 2 + (Math.random() - 0.5) * 0.26;
-      const reach = 2.4 + Math.random() * 2.8;
-      const pts = [];
-      const wobble = Math.random() * Math.PI * 2;
-      for (let j = 0; j <= 7; j++) {
-        const t = j / 7;
-        // 前段離開身體，中段外擴，末段貼地捲曲（參考圖尖端捲起的樣子）
-        const r = 0.30 + reach * Math.pow(t, 0.70);
-        const swing = Math.sin(t * 2.6 + wobble) * 0.46 * t;
-        const curl = t > 0.80 ? Math.pow((t - 0.80) / 0.20, 2) * 0.95 : 0;
-        const a = angle + swing;
-        pts.push(new THREE.Vector3(
-          Math.cos(a) * r - Math.cos(a) * curl,
-          0.05 + Math.sin(t * Math.PI) * 0.12 - t * 0.05 + curl * 0.16,
-          Math.sin(a) * r - Math.sin(a) * curl
-        ));
-      }
-      const tentMesh = new THREE.Mesh(
-        createTaperedTubeGeometry(new THREE.CatmullRomCurve3(pts), 44, 8, 0.075, 0.008),
-        createSlothTentacleMaterial(i * 0.63)
-      );
-      tentMesh.userData = { angle, phase: i * 0.63 };
-      tentacles.push(tentMesh);
-      shape.add(tentMesh);
+    // 地面陷坑：被身體壓出來的隆起圈與碎石
+    const soilMat = new THREE.MeshStandardMaterial({ color: 0x1d1a1f, roughness: 1 });
+    const crater = new THREE.Mesh(new THREE.TorusGeometry(1.75, 0.42, 10, 40), soilMat);
+    crater.rotation.x = Math.PI / 2; crater.scale.set(1, 1, 0.45); crater.position.y = 0.05;
+    shape.add(crater);
+    for (let i = 0; i < 16; i++) {
+      const a = Math.random() * Math.PI * 2, r = rnd(1.5, 2.4);
+      const lump = new THREE.Mesh(new THREE.DodecahedronGeometry(rnd(0.1, 0.3), 0), bodyMat);
+      lump.position.set(Math.cos(a) * r, 0.1, Math.sin(a) * r);
+      lump.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      lump.castShadow = true;
+      shape.add(lump);
     }
 
-    // 袍腳的暗紫積霧：讓袍身與地面長鬚的交界不突兀
-    const mistGeo = new THREE.CircleGeometry(1.05, 40);
-    const mist = new THREE.Mesh(mistGeo, new THREE.MeshBasicMaterial({
-      color: 0x2a0d3f, transparent: true, opacity: 0.5,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    }));
-    mist.rotation.x = -Math.PI / 2;
-    mist.position.y = 0.02;
-    shape.add(mist);
+    // 肚腹垂掛的石筍利齒：從身體中段向下，長短不一，有些戳到地面
+    for (let i = 0; i < 15; i++) {
+      const a = (i / 15) * Math.PI * 2 + rnd(-0.12, 0.12);
+      const Y0 = rnd(0.85, 1.3), L = rnd(0.7, 1.55), R = radiusAt(Y0);
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(rnd(0.10, 0.2), L, 8), bodyMat);
+      cone.rotation.x = Math.PI;
+      cone.rotation.z = rnd(-0.12, 0.12);
+      cone.position.set(Math.cos(a) * R * 0.92 + 0.12, Y0 - L / 2 + 0.05, Math.sin(a) * R * 0.85);
+      cone.castShadow = true;
+      shape.add(cone);
+    }
 
-    const hit = new THREE.Mesh(new THREE.SphereGeometry(1.7, 8, 8), new THREE.MeshBasicMaterial({ visible: false }));
+    // 兩條重臂：厚實肩窩（一半埋在身體裡）＋一節節重疊的斷節，最後拖成一塊沉重的錨
+    const arms = [];
+    [-1, 1].forEach(s => {
+      const armG = new THREE.Group();
+      shape.add(armG);
+      const sx = s > 0 ? 1.15 : -0.85, sy = 1.4;
+      const socket = new THREE.Mesh(new THREE.SphereGeometry(0.46, 20, 14), bodyMat);
+      socket.scale.set(1, 0.9, 1);
+      socket.position.set(sx, sy, 0.1);
+      socket.castShadow = true;
+      armG.add(socket);
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(sx, sy, 0.1),
+        new THREE.Vector3(sx + s * 0.55, sy - 0.45, 0.4),
+        new THREE.Vector3(sx + s * 0.75, sy - 1.0, 1.0),
+        new THREE.Vector3(sx + s * 0.45, sy - 1.3, 1.6),
+        new THREE.Vector3(sx + s * 0.2, sy - 1.34, 1.95),
+      ]);
+      const N = 9;
+      for (let k = 0; k <= N; k++) {
+        const t = k / N, p = curve.getPoint(t), tan = curve.getTangent(t).normalize();
+        const rad = 0.30 * (1 - 0.5 * t) + 0.05;
+        const seg = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), bodyMat);
+        seg.scale.set(rad, rad * 0.88, rad * 1.5);
+        seg.position.copy(p);
+        seg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tan);
+        seg.castShadow = true;
+        armG.add(seg);
+      }
+      const anchor = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.3, 0.8), bodyMat);   // 末端：拖在地上的重錨
+      const pe = curve.getPoint(1);
+      anchor.position.set(pe.x, 0.17, pe.z + 0.1);
+      anchor.rotation.set(rnd(-0.1, 0.1), s * 0.4, rnd(-0.1, 0.1));
+      anchor.castShadow = true;
+      armG.add(anchor);
+      arms.push(armG);
+    });
+
+    // 環繞的灰燼碎片（極慢旋轉），少數帶暗紫幽光
+    const shards = new THREE.Group();
+    shard: {
+      const ashMat = new THREE.MeshStandardMaterial({ color: 0x2c2a30, roughness: 1 });
+      const glowMat = new THREE.MeshBasicMaterial({ color: 0x9a52e0 });
+      for (let i = 0; i < 46; i++) {
+        const a = Math.random() * Math.PI * 2, r = rnd(2.3, 3.4);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(rnd(0.07, 0.22), rnd(0.05, 0.16), rnd(0.07, 0.22)), i % 8 === 0 ? glowMat : ashMat);
+        m.position.set(Math.cos(a) * r, rnd(0.4, 2.5), Math.sin(a) * r);
+        m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+        m.userData.spin = rnd(-0.25, 0.25);
+        shards.add(m);
+      }
+    }
+    shape.add(shards);
+
+    // 重力圈：貼地的幾圈暗紫環，不斷向本體收縮（被拖著下沉）
+    const rings = [];
+    for (let i = 0; i < 3; i++) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.97, 1.0, 72), new THREE.MeshBasicMaterial({
+        color: 0x8a45d6, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.04;
+      ring.userData.i = i;
+      shape.add(ring);
+      rings.push(ring);
+    }
+    const shadow = new THREE.Mesh(new THREE.CircleGeometry(2.9, 40), new THREE.MeshBasicMaterial({
+      map: createRadialGlowTexture('0,0,0'), transparent: true, opacity: 0.6, depthWrite: false,
+    }));
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.02;
+    shape.add(shadow);
+
+    // 緩緩下沉的灰燼微粒
+    const MOTES = 110;
+    const mp = new Float32Array(MOTES * 3);
+    for (let i = 0; i < MOTES; i++) {
+      const a = Math.random() * Math.PI * 2, r = rnd(0.8, 3.2);
+      mp[i * 3] = Math.cos(a) * r; mp[i * 3 + 1] = rnd(0, 3.4); mp[i * 3 + 2] = Math.sin(a) * r;
+    }
+    const motesGeo = new THREE.BufferGeometry();
+    motesGeo.setAttribute('position', new THREE.BufferAttribute(mp, 3));
+    const motes = new THREE.Points(motesGeo, new THREE.PointsMaterial({ color: 0xb59cff, size: 0.06, transparent: true, opacity: 0.55, depthWrite: false }));
+    motes.frustumCulled = false;
+    shape.add(motes);
+
+    const hit = new THREE.Mesh(new THREE.SphereGeometry(1.9, 8, 8), new THREE.MeshBasicMaterial({ visible: false }));
     hit.userData = { sinKey: 'sloth' };
-    hit.position.y = 1.5;
+    hit.position.y = 1.1;
     shape.add(hit);
 
-    sinCreatures.sloth = { group: grp, shape, body, head, hoodGroup, cowl, hoodTip, face, eyes, cape, cape2, mist, tentacles, cloakMat, hit };
+    sinCreatures.sloth = { group: grp, shape, body, arms, shards, rings, motes, bodyMat, hit };
     sinsGroup.add(grp);
   }
 
@@ -5203,25 +8307,82 @@ function buildSinsSpores() {
 // -------------------------------------------------------------
 // [虛無 Void] 三大指令
 // -------------------------------------------------------------
+// 核心強光：三層疊加——核心本體白熱（自發光）、疊加光暈精靈瞬間脹大蓋過畫面、點光源把周遭膜面照亮；都是 80ms 衝頂、約 1 秒淡出
+let voidFlash = null, voidFlashLight = null;
+function flashVoidCore(power = 1) {
+  if (!voidFlash) {
+    voidFlash = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: createRadialGlowTexture('255,255,255'), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+    }));
+    voidFlash.renderOrder = 999;
+    voidGroup.add(voidFlash);
+    voidFlashLight = new THREE.PointLight(0xe9d5ff, 0, 40);
+    voidGroup.add(voidFlashLight);
+  }
+  const up = TWEEN.Easing.Quadratic.Out, down = TWEEN.Easing.Cubic.In;
+  const peak = (obj, key, max, upMs, downMs) => {
+    const o = {}; o[key] = max;
+    const z = {}; z[key] = 0;
+    new TWEEN.Tween(obj).to(o, upMs).easing(up).chain(new TWEEN.Tween(obj).to(z, downMs).easing(down)).start();
+  };
+  voidCore.material.emissive.set(0xffffff);
+  voidCore.material.emissiveIntensity = 0;
+  peak(voidCore.material, 'emissiveIntensity', 5 * power, 80, 1100);
+  voidFlash.scale.set(3, 3, 1);
+  new TWEEN.Tween(voidFlash.scale).to({ x: 18, y: 18 }, 700).easing(TWEEN.Easing.Exponential.Out).start();
+  peak(voidFlash.material, 'opacity', Math.min(1, power), 80, 1000);
+  peak(voidFlashLight, 'intensity', 14 * power, 80, 1100);
+}
+
 function triggerVoidDevour() {
   if (isVoidActionRunning) return;
   isVoidActionRunning = true;
-  voidStateText.innerText = "包覆吞噬：事象地平面擴張，空間捲曲...";
+  if (typeof VoidVoice !== 'undefined') VoidVoice.embrace(); // 吞噬時叫得更飽滿（10 秒冷卻）
+  voidStateText.innerText = "包覆吞噬：萬物向奇點坍縮...";
 
-  new TWEEN.Tween(voidMembrane.scale).to({ x: 3.2, y: 3.2, z: 3.2 }, 900).easing(TWEEN.Easing.Cubic.Out).start();
-  new TWEEN.Tween(voidMembraneWire.scale).to({ x: 3.2, y: 3.2, z: 3.2 }, 900).easing(TWEEN.Easing.Cubic.Out).start();
-  new TWEEN.Tween(voidAura.material).to({ opacity: 0.8 }, 700).start();
+  // 大爆炸節奏：① 微微收縮蓄力（慢）→ ② 奇點爆發、極速暴脹後減速（快）→ ③ 餘波漂移 → ④ 緩緩收斂
+  const scaleTo = (mesh, to, ms, ease) => new TWEEN.Tween(mesh.scale).to({ x: to, y: to, z: to }, ms).easing(ease).start();
 
+  // ① 收縮：外膜縮到約 78%、核心與光暈一起內縮、符文被往內吸一點，光暈暗下去
+  scaleTo(voidMembrane, 0.78, 750, TWEEN.Easing.Sinusoidal.InOut);
+  scaleTo(voidMembraneWire, 0.78 * 1.01, 750, TWEEN.Easing.Sinusoidal.InOut);
+  scaleTo(voidCore, 0.82, 750, TWEEN.Easing.Sinusoidal.InOut);
+  new TWEEN.Tween(voidAura.material).to({ opacity: 0.1 }, 750).start();
+  new TWEEN.Tween(voidRuneBurst).to({ v: -0.14 }, 750).easing(TWEEN.Easing.Sinusoidal.InOut).start();
+
+  // ② 爆發：極短時間衝到最大（指數緩出＝一開始最快、後面越來越慢），光暈瞬間閃白、核心脹一下、符文向外炸開
   setTimeout(() => {
-    voidStateText.innerText = "吸收文明能量，外膜收斂重組...";
+    voidStateText.innerText = "奇點爆發！時空極速暴脹——";
+    if (typeof VoidVoice !== 'undefined') VoidVoice.embrace();
+    flashVoidCore();
+    scaleTo(voidMembrane, 4.2, 420, TWEEN.Easing.Exponential.Out);
+    scaleTo(voidMembraneWire, 4.2 * 1.01, 420, TWEEN.Easing.Exponential.Out);
+    scaleTo(voidCore, 1.3, 220, TWEEN.Easing.Quadratic.Out);
+    new TWEEN.Tween(voidAura.material).to({ opacity: 1.0 }, 140).easing(TWEEN.Easing.Quadratic.Out).start();
+    new TWEEN.Tween(voidRuneBurst).to({ v: 1.0 }, 600).easing(TWEEN.Easing.Exponential.Out).start();
+  }, 800);
 
-    new TWEEN.Tween(voidMembrane.scale).to({ x: 1, y: 1, z: 1 }, 1200).easing(TWEEN.Easing.Back.InOut).start();
-    new TWEEN.Tween(voidMembraneWire.scale).to({ x: 1, y: 1, z: 1 }, 1200).easing(TWEEN.Easing.Back.InOut).start();
-    new TWEEN.Tween(voidAura.material).to({ opacity: 0.28 }, 1200).onComplete(() => {
+  // ③ 餘波：外膜仍緩慢外漂、光暈慢慢退，像宇宙持續膨脹
+  setTimeout(() => {
+    voidStateText.innerText = "餘波擴散，吸收文明能量...";
+    scaleTo(voidMembrane, 4.6, 1000, TWEEN.Easing.Linear.None);
+    scaleTo(voidMembraneWire, 4.6 * 1.01, 1000, TWEEN.Easing.Linear.None);
+    scaleTo(voidCore, 1.0, 900, TWEEN.Easing.Cubic.InOut);
+    new TWEEN.Tween(voidAura.material).to({ opacity: 0.6 }, 1000).start();
+  }, 1300);
+
+  // ④ 收斂：外膜與符文緩緩回到原位
+  setTimeout(() => {
+    voidStateText.innerText = "外膜收斂重組...";
+    scaleTo(voidMembrane, 1, 1300, TWEEN.Easing.Cubic.InOut);
+    scaleTo(voidMembraneWire, 1, 1300, TWEEN.Easing.Cubic.InOut);
+    new TWEEN.Tween(voidRuneBurst).to({ v: 0 }, 1500).easing(TWEEN.Easing.Cubic.InOut).start();
+    new TWEEN.Tween(voidAura.material).to({ opacity: 0.28 }, 1300).onComplete(() => {
       isVoidActionRunning = false;
       voidStateText.innerText = "平穩呼吸・殘影共鳴中";
     }).start();
-  }, 1800);
+  }, 2400);
 }
 
 function triggerVoidAssimilate() {
@@ -5252,10 +8413,88 @@ function triggerVoidAssimilate() {
 // 第一次按：整組沿鏡頭方向壓進二維平面，中心從「四維投影成三維」
 //           收合成「三維立方體畫在二維紙上」的線稿
 // 再按一次：平面展開，回到原本的三維形態
+// 前搖：空間失穩——整隻虛無由小到大劇烈震顫（振幅逐步升高）、核心內縮、符文被往內擠、光暈發亮，
+// 約 1.2 秒後在震幅最大時「啪」一聲才真正切換維度。由 animate() 每幀呼叫 applyVoidTeleportShake()
+const voidTeleportShake = { amp: 0, active: false, base: new THREE.Vector3() };
+
+// 衝擊波環：面向鏡頭、從核心位置往外擴散並淡出，結束後自己清掉
+function spawnVoidShockwave(hex, maxScale = 16, ms = 750, delay = 0) {
+  setTimeout(() => {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.93, 1, 64),
+      new THREE.MeshBasicMaterial({ color: hex, transparent: true, opacity: 0.95, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false })
+    );
+    ring.renderOrder = 998;
+    voidGroup.getWorldPosition(ring.position);
+    ring.quaternion.copy(camera.quaternion);
+    ring.scale.setScalar(1.5);
+    scene.add(ring);
+    new TWEEN.Tween(ring.scale).to({ x: maxScale, y: maxScale, z: 1 }, ms).easing(TWEEN.Easing.Cubic.Out).start();
+    new TWEEN.Tween(ring.material).to({ opacity: 0 }, ms).easing(TWEEN.Easing.Quadratic.In).onComplete(() => {
+      scene.remove(ring); ring.geometry.dispose(); ring.material.dispose();
+    }).start();
+  }, delay);
+}
+// 鏡頭視角衝擊：fov 先收再放，onUpdate 要重算投影矩陣
+function tweenCameraFov(to, ms, ease) {
+  new TWEEN.Tween(camera).to({ fov: to }, ms).easing(ease).onUpdate(() => camera.updateProjectionMatrix()).start();
+}
+function applyVoidTeleportShake(t) {
+  const k = voidTeleportShake;
+  if (!k.active) return;
+  const a = k.amp;
+  voidGroup.position.set(
+    k.base.x + (Math.sin(t * 83) + Math.sin(t * 47 + 1.3)) * 0.14 * a,
+    k.base.y + (Math.sin(t * 71 + 0.7) + Math.sin(t * 53)) * 0.14 * a,
+    k.base.z + (Math.sin(t * 61 + 2.1) + Math.sin(t * 97)) * 0.10 * a
+  );
+  const tremble = 1 + Math.sin(t * 58) * 0.05 * a;          // 外膜高頻抽動
+  voidMembrane.scale.setScalar(tremble);
+  voidMembraneWire.scale.setScalar(tremble * 1.01);
+  voidAura.scale.setScalar(1 + Math.sin(t * 40) * 0.2 * a);
+  // 震幅過半後，線框在青／洋紅／白之間快速閃爍（像訊號破圖）
+  if (a > 0.3) voidMembraneWire.material.color.setHex([0x38bdf8, 0xff2bd6, 0xffffff][Math.floor(t * 22) % 3]);
+}
+
 function triggerVoidTeleport() {
   if (isVoidActionRunning) return;
   isVoidActionRunning = true;
 
+  const k = voidTeleportShake;
+  k.base.copy(voidGroup.position);
+  k.amp = 0;
+  k.active = true;
+  voidStateText.innerText = isVoidFlat ? "維度結構不穩：平面開始震顫、邊緣撕裂..." : "維度結構不穩：空間劇烈震顫，物質開始失去厚度...";
+  if (typeof VoidVoice !== 'undefined') VoidVoice.embrace();
+
+  new TWEEN.Tween(k).to({ amp: 1 }, 1100).easing(TWEEN.Easing.Quadratic.In).start();       // 震幅越來越大
+  new TWEEN.Tween(voidCore.scale).to({ x: 0.78, y: 0.78, z: 0.78 }, 1100).easing(TWEEN.Easing.Quadratic.In).start();
+  new TWEEN.Tween(voidRuneBurst).to({ v: -0.25 }, 1100).easing(TWEEN.Easing.Quadratic.In).start();
+  new TWEEN.Tween(voidAura.material).to({ opacity: 0.85 }, 1100).start();
+  tweenCameraFov(38, 1150, TWEEN.Easing.Quadratic.In);           // 鏡頭越推越緊
+  spawnVoidShockwave(0x38bdf8, 7, 600, 450);                      // 蓄力途中兩道小衝擊波
+  spawnVoidShockwave(0xff2bd6, 9, 650, 850);
+
+  setTimeout(() => {
+    // 震幅最高點：停震、核心與符文彈回，接著進入真正的維度切換
+    k.active = false;
+    voidGroup.position.copy(k.base);
+    voidMembraneWire.material.color.setHex(0x38bdf8);
+    // 切換瞬間的爆點：強光、兩道大衝擊波、鏡頭先外彈再回正、整體鼓一下
+    flashVoidCore(0.8);
+    spawnVoidShockwave(0xffffff, 22, 800);
+    spawnVoidShockwave(0xa855f7, 26, 1000, 130);
+    tweenCameraFov(54, 110, TWEEN.Easing.Quadratic.Out);
+    setTimeout(() => tweenCameraFov(45, 700, TWEEN.Easing.Cubic.InOut), 120);
+    new TWEEN.Tween(voidGroup.scale).to({ x: 1.3, y: 1.3 }, 110).easing(TWEEN.Easing.Quadratic.Out).yoyo(true).repeat(1).start();
+    new TWEEN.Tween(voidCore.scale).to({ x: 1, y: 1, z: 1 }, 400).easing(TWEEN.Easing.Back.Out).start();
+    new TWEEN.Tween(voidRuneBurst).to({ v: 0 }, 700).easing(TWEEN.Easing.Cubic.Out).start();
+    new TWEEN.Tween(voidAura.material).to({ opacity: 0.28 }, 900).start();
+    performVoidTeleport();
+  }, 1200);
+}
+
+function performVoidTeleport() {
   isVoidFlat = !isVoidFlat;
   syncVoidTeleportBtn();
 
@@ -5360,22 +8599,166 @@ function triggerSinsFrenzy() {
   isSinsFrenzy = true;
 
   const stateText = document.getElementById('sin-state-text');
-  if (stateText) stateText.innerText = "罪孽狂宴爆發！七大罪集體過載，振盪頻率飆升至 300%！";
+  if (stateText) stateText.innerText = "罪孽狂宴爆發！七罪各現本性——傲慢升空、貪婪撲抓、暴怒狂震、嫉妒覬覦、色慾起舞、暴食膨脹、怠惰癱倒！";
 
+  // 記下各隻原本的旋轉，狂宴結束時還原；編舞由 animate() 每幀呼叫 applySinsFrenzyChoreo()
+  SINS_FRENZY.start = performance.now();
   for (const key in sinCreatures) {
     const grp = sinCreatures[key].group;
-    new TWEEN.Tween(grp.scale)
-      .to({ x: 1.4, y: 1.4, z: 1.4 }, 350)
-      .yoyo(true)
-      .repeat(3)
-      .start();
+    grp.userData.frenzyRot = grp.rotation.clone();
   }
 
   setTimeout(() => {
     isSinsFrenzy = false;
     isSinsActionRunning = false;
+    for (const key in sinCreatures) {
+      const grp = sinCreatures[key].group;
+      grp.scale.set(1, 1, 1);
+      if (grp.userData.frenzyRot) grp.rotation.copy(grp.userData.frenzyRot);
+      grp.position.copy(grp.userData.basePos);
+    }
     if (stateText) stateText.innerText = SINS_DATA[currentSelectedSin]?.state || "生態平衡・7 隻生命體共生共鳴中";
-  }, 3800);
+  }, SINS_FRENZY.dur * 1000);
+}
+
+// —— 罪孽狂宴編舞：持續 5 秒，七隻各演自己的罪 ——
+// 設計原則（讓它像活體而不是在滑動的物件）：
+//   1) 起勢 → 爆發 → 收勢：先蓄力（反向縮一下）再出擊，落地要壓扁、再彈回（擠壓與拉伸）
+//   2) 不用 Math.random 抖動、不用等速滑動／自轉；用緩動曲線與「衰減震動」
+//   3) 移動時身體朝向移動方向、並順勢前傾
+// 每隻只動「整組」的位置／旋轉／縮放（不碰內部細節），e 是淡入淡出包絡（0→1→0）
+const SINS_FRENZY = { dur: 5, start: 0 };
+const _clamp01 = (x) => Math.max(0, Math.min(1, x));
+const _smooth = (x) => { x = _clamp01(x); return x * x * (3 - 2 * x); };
+const _easeOut = (x) => 1 - Math.pow(1 - _clamp01(x), 3);
+const _easeIn = (x) => Math.pow(_clamp01(x), 3);
+const _angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));   // a 轉到 b 的最短角度
+
+function applySinsFrenzyChoreo() {
+  const t = (performance.now() - SINS_FRENZY.start) / 1000;
+  const ramp = 0.6;
+  const e = _smooth(Math.min(t / ramp, (SINS_FRENZY.dur - t) / ramp));
+  const TAU = Math.PI * 2;
+
+  const place = (key, fn) => {
+    const c = sinCreatures[key];
+    if (!c) return;
+    const g = c.group, b = g.userData.basePos, r0 = g.userData.frenzyRot || g.rotation;
+    g.position.copy(b);
+    g.rotation.copy(r0);
+    g.scale.set(1, 1, 1);
+    fn(g, b, r0);
+  };
+  // 面向某個水平方向（依 e 淡入，不會瞬間轉頭）
+  const face = (g, r0, dx, dz) => {
+    g.rotation.y = r0.y + _angDiff(r0.y, Math.atan2(dx, dz)) * e;
+  };
+
+  // 傲慢：昂首緩緩升起、挺胸，慢慢左顧右盼（俯視眾生），像飄浮的帝王，動作從容不急
+  place('pride', (g, b, r0) => {
+    g.position.y = b.y + 2.4 * _easeOut(t / 1.6) * e + Math.sin(t * 1.6) * 0.12 * e;
+    g.rotation.y = r0.y + Math.sin(t * 0.9) * 0.7 * e;          // 緩慢睥睨，不是一直自轉
+    g.rotation.x = r0.x - 0.12 * e;                              // 仰頭
+    const s = 1 + 0.22 * e + 0.025 * Math.sin(t * 2.4);          // 挺胸 + 呼吸
+    g.scale.set(s, s, s);
+  });
+
+  // 貪婪：循環「蓄力→猛撲→抓住→收回」，每圈 1.25 秒；撲出去時身體拉長、收回時回彈
+  place('greed', (g, b, r0) => {
+    const cx = 0 - b.x, cz = 0 - b.z;
+    const len = Math.hypot(cx, cz) || 1;
+    const p = (t / 1.25) % 1;
+    let reach = 0, stretch = 0;
+    if (p < 0.22) { const k = p / 0.22; reach = -0.12 * _smooth(k); stretch = -0.12 * _smooth(k); }          // 蓄力：往後縮、壓扁
+    else if (p < 0.40) { const k = (p - 0.22) / 0.18; reach = -0.12 + 0.82 * _easeOut(k); stretch = -0.12 + 0.34 * _easeOut(k); }  // 猛撲：快速伸出
+    else if (p < 0.55) { reach = 0.70; stretch = 0.22 - 0.22 * _smooth((p - 0.40) / 0.15); }                 // 抓住：停頓、回彈
+    else { reach = 0.70 * (1 - _smooth((p - 0.55) / 0.45)); }                                                  // 緩緩收回
+    reach *= e; stretch *= e;
+    g.position.x = b.x + (cx / len) * reach * len * 0.85;
+    g.position.z = b.z + (cz / len) * reach * len * 0.85;
+    g.position.y = b.y + 0.3 * Math.max(0, reach);
+    face(g, r0, cx, cz);
+    g.rotation.x = r0.x + 0.35 * Math.max(0, reach) * e;         // 撲出時前傾
+    g.scale.set(1 - stretch * 0.4, 1 - stretch * 0.4, 1 + stretch);   // 沿撲出方向拉長
+  });
+
+  // 暴怒：循環「後仰蓄怒→猛砸落地→落地震顫衰減」，每圈 1.0 秒；震顫是衰減的，不是亂抖
+  place('wrath', (g, b, r0) => {
+    const p = (t / 1.0) % 1;
+    let lift = 0, tilt = 0, sq = 0, shake = 0;
+    if (p < 0.55) { const k = _easeOut(p / 0.55); lift = 0.9 * k; tilt = -0.35 * k; sq = -0.10 * k; }       // 抬高、後仰、身體拉高
+    else if (p < 0.65) { const k = _easeIn((p - 0.55) / 0.10); lift = 0.9 * (1 - k); tilt = -0.35 * (1 - k) + 0.20 * k; sq = -0.10 + 0.34 * k; }   // 猛砸
+    else { const k = (p - 0.65) / 0.35; lift = 0; tilt = 0.20 * (1 - _smooth(k)); sq = 0.24 * Math.exp(-5 * k); shake = Math.exp(-5 * k) * Math.sin(k * 40); }   // 壓扁後彈回＋衰減震顫
+    g.position.y = b.y + lift * e;
+    g.position.x = b.x + shake * 0.12 * e;
+    g.rotation.x = r0.x + tilt * e;
+    g.rotation.y = r0.y + Math.sin(t * 5.0) * 0.25 * e;          // 怒目左右猛甩頭（小幅）
+    g.scale.set(1 + sq * 0.7 * e, 1 - sq * e, 1 + sq * 0.7 * e);
+  });
+
+  // 嫉妒：一格一格偷偷爬向傲慢——走兩步、停下偷看、再走；身體低伏、朝向目標
+  place('envy', (g, b, r0) => {
+    const p = sinCreatures.pride && sinCreatures.pride.group.userData.basePos;
+    if (!p) return;
+    const dx = p.x - b.x, dy = p.y - b.y, dz = p.z - b.z;
+    const stepT = 0.9;
+    const n = Math.floor(t / stepT);
+    const within = (t % stepT) / stepT;
+    const stepsTotal = 5;
+    const progress = (Math.min(n, stepsTotal - 1) + (n < stepsTotal ? _smooth(within / 0.55) : 1)) / stepsTotal * 0.38;   // 每一步只在前 55% 時間移動，其餘停下偷看
+    const moving = (n < stepsTotal && within < 0.55) ? 1 : 0;
+    g.position.x = b.x + dx * progress * e;
+    g.position.y = b.y + dy * progress * e - 0.2 * e;
+    g.position.z = b.z + dz * progress * e;
+    face(g, r0, dx, dz);
+    g.rotation.y += Math.sin(t * 2.6) * 0.25 * (1 - moving) * e;                   // 停下時左右偷瞄
+    g.rotation.x = r0.x + 0.25 * moving * e;                                         // 前行時身體前傾
+    const s = 1 - 0.12 * e;
+    g.scale.set(s, s * (1 - 0.06 * moving), s);
+  });
+
+  // 色慾：沿著橢圓軌道曼妙滑行，身體朝向行進方向、隨動作側傾，並隨心跳（雙拍）一縮一放
+  place('lust', (g, b, r0) => {
+    const w = 1.1;                                                  // 角速度（約 5.7 秒一圈，慢而柔）
+    const a = t * w;
+    const rx = 1.9 * e, rz = 1.2 * e;
+    const x = Math.sin(a) * rx, z = (1 - Math.cos(a)) * rz;         // 從原位出發繞一個橢圓回來
+    g.position.x = b.x + x;
+    g.position.z = b.z + z;
+    g.position.y = b.y + 0.15 * e + Math.sin(a * 2) * 0.25 * e;
+    const vx = Math.cos(a) * rx, vz = Math.sin(a) * rz;             // 速度方向
+    face(g, r0, vx, vz);
+    g.rotation.z = r0.z - Math.cos(a) * 0.18 * e;                   // 轉彎時內傾
+    const bp = (t * 1.5) % 1;                                       // 雙拍心跳
+    const beat = Math.exp(-18 * Math.pow(bp - 0.12, 2)) + 0.6 * Math.exp(-18 * Math.pow(bp - 0.34, 2));
+    const s = 1 + 0.10 * e + 0.16 * beat * e;
+    g.scale.set(s, s * (1 + 0.06 * beat * e), s);
+  });
+
+  // 暴食：每隔約 0.7 秒大口吞一下——吞的瞬間身體猛擴張、再彈簧般回穩，累積的體型一口一口變大
+  place('gluttony', (g, b, r0) => {
+    const gulpT = 0.7;
+    const n = Math.floor(t / gulpT);
+    const k = (t % gulpT);
+    const grown = Math.min(n + 1, 7) / 7;                           // 每吞一口 +1 級，最多 7 級
+    const baseS = 1 + 0.55 * grown * e;
+    const spring = Math.exp(-6 * k) * Math.cos(k * 22);            // 吞下去的彈簧衰減震盪
+    const gulp = 0.14 * spring * e;
+    g.scale.set(baseS + gulp, baseS - gulp * 1.3, baseS + gulp);
+    g.position.y = b.y + 0.35 * e + 0.12 * Math.max(0, spring) * e;
+    g.rotation.z = r0.z + Math.sin(t * 1.4) * 0.06 * e;            // 沉重地微微左右晃
+  });
+
+  // 怠惰：全場在發狂，牠先慢慢癱向一側，中途吃力地撐起一下，又無力地倒回去（再多動一下都嫌累）
+  place('sloth', (g, b, r0) => {
+    const droop = _smooth(t / 1.8);
+    const struggle = Math.exp(-Math.pow((t - 3.1) / 0.45, 2));       // 約第 3 秒掙扎一下
+    const lean = 0.6 * droop - 0.25 * struggle;
+    g.rotation.z = r0.z + lean * e;
+    g.position.x = b.x - 0.5 * lean * e;
+    const flat = 0.22 * droop - 0.08 * struggle;
+    g.scale.set(1 + flat * 0.4 * e, 1 - flat * e, 1 + flat * 0.4 * e);
+  });
 }
 
 // —— 群聚漩渦：拔地而起 → 建築物上空成環快速旋轉 → 歸位 ——
@@ -5568,6 +8951,9 @@ function onShameHoverLeave() {
 // -------------------------------------------------------------
 function setSpecies(species) {
   currentSpecies = species;
+  // 生物叫聲：愛（溫和鳩鳴＋水滴）與虛無（人聲＋大水）各自只在自己在場時才叫
+  if (typeof LoveVoice !== 'undefined') LoveVoice.setActive(species === 'love');
+  if (typeof VoidVoice !== 'undefined') VoidVoice.setActive(species === 'void');
 
   // 場景底色連動：深色場景（羞恥／虛無／七大罪）時 HUD 紙底同步加深
   document.body.classList.remove('scene-love', 'scene-shame', 'scene-void', 'scene-sins');
@@ -5721,7 +9107,7 @@ function setSpecies(species) {
 
     // Zaun 底城：化技綠霧霾＋昏暗月光（The Gray 的綠色版）
     scene.background = new THREE.Color(0x0c1210);
-    scene.fog = new THREE.FogExp2(0x101c16, 0.022);
+    scene.fog = new THREE.FogExp2(0x0e1713, 0.03);
     if (ambientLight) { ambientLight.color.setHex(0x243328); ambientLight.intensity = 0.9; }
     if (sunLight) { sunLight.color.setHex(0x99aa88); sunLight.intensity = 0.35; }
     if (hemiLight) hemiLight.intensity = 0.25;
@@ -5837,6 +9223,16 @@ function setupUI() {
   if (btnSinsBalance) btnSinsBalance.addEventListener('click', triggerSinsBalance);
 
   // 重置攝影機
+  // 聲音開關（瀏覽器規定要點擊才能出聲）
+  const btnSound = document.getElementById('btn-sound');
+  if (btnSound) btnSound.addEventListener('click', async () => {
+    if (typeof VoidVoice === 'undefined') { btnSound.innerText = '聲音：載入失敗'; return; }
+    // 兩隻生物的聲音一起開關，各自只在自己在場時叫
+    const on = await VoidVoice.toggle(currentSpecies === 'void');
+    if (typeof LoveVoice !== 'undefined') await LoveVoice.toggle(currentSpecies === 'love');
+    btnSound.innerText = on ? '聲音：開' : '聲音：關';
+  });
+
   document.getElementById('btn-reset-cam').addEventListener('click', () => {
     if (currentSpecies === 'sins') {
       selectSin('all', true);
@@ -5920,21 +9316,11 @@ function animate() {
     // 懸浮浮沉
     loveGroup.position.y = loveBaseY + Math.sin(elapsedTime * 1.6) * 0.18;
 
-    // 覓食光線：淡入淡出＋每幀重接愛的最新位置（移動時自動跟著走）
+    // 覓食光線：淡入淡出＋螺旋光絲與光點流（見 updateLoveFeed）
     if (loveFeedGroup) {
       loveFeedFactor += ((isLoveFeeding ? 1 : 0) - loveFeedFactor) * Math.min(1, frameDelta * 3);
       loveFeedGroup.visible = loveFeedFactor > 0.02;
-      if (loveFeedGroup.visible) {
-        const lx = loveGroup.position.x, ly = loveGroup.position.y, lz = loveGroup.position.z;
-        for (const line of loveFeedLines) {
-          const rp = line.userData.relic.position; // 遺物靜止不動
-          const pos = line.geometry.attributes.position.array;
-          pos[0] = rp.x; pos[1] = rp.y + 0.6; pos[2] = rp.z; // 遺物中心約地面上 0.6
-          pos[3] = lx; pos[4] = ly; pos[5] = lz; // 愛的身上
-          line.geometry.attributes.position.needsUpdate = true;
-          line.material.opacity = 0.35 * loveFeedFactor;
-        }
-      }
+      updateLoveFeed(elapsedTime, frameDelta);
     }
 
     // 鏡頭永遠跟隨：愛移動多少，相機就跟著平移多少，並鎖定注視點
@@ -5995,28 +9381,56 @@ function animate() {
       const wingDroop = (1 - loveEnergy) * 0.5;
 
       // 環抱係數平滑趨近目標
-      loveEmbrace += (loveEmbraceTarget - loveEmbrace) * 0.06;
+      // FIXED-009: 原本每幀固定乘 0.06，低幀率電腦會抱得很慢；改成用時間差，60fps 時效果與原本相同
+      loveEmbrace += (loveEmbraceTarget - loveEmbrace) * (1 - Math.exp(-3.76 * frameDelta));
       const e = loveEmbrace;
+      const hugScale = 1 + e * LOVE_HUG_SCALE_ADD;
+      const hugC = e * LOVE_HUG_CURVE; // 目前彎曲率：0＝攤平，越大越捲向身體
+      // 圓弧圓心要落在身體中心：翅膀根部退到圓的最後方（圓半徑 = 1/C，再乘翅膀放大）
+      const hugRootZ = -0.12 - hugScale / LOVE_HUG_CURVE; // 身體中心在 z≈-0.12
 
       loveWings.forEach((w) => {
         const flap = Math.sin(elapsedTime * flapSpeed + w.phase);
 
-        // 環抱：翅膀根部前移、放大、向內合攏
+        // 翅膀根部：從背後往圓弧後方靠攏（兩邊根部幾乎重疊在背後正中央）
         w.pivot.position.set(
           w.side * (0.6 - e * 0.35),
-          0.3 + e * 0.15,
-          -0.3 + e * 1.6
+          0.3 + e * 0.1,
+          LOVE_WING_Z + e * (hugRootZ - LOVE_WING_Z)
         );
-        w.pivot.rotation.y = w.side * (0.28 - e * 1.15); // 向前方掃攏
-        w.pivot.rotation.z = w.side * (0.22 + flap * flapAmp * (1 - e) - wingDroop) + w.side * e * 0.55; // 抬高環抱弧線
-        w.pivot.scale.setScalar(1 + e * 1.35); // 環抱時明顯放大
+        w.pivot.rotation.y = w.side * 0.28 * (1 - e); // 攤開時外八，環抱時由圓弧本身決定方向
+        // 攤開時的搧動／下垂隨環抱淡出（不然整個圓弧會歪掉），環抱時只留一點呼吸
+        w.pivot.rotation.z = w.side * (0.22 + flap * flapAmp - wingDroop) * (1 - e) + w.side * flap * 0.02 * e;
+        w.pivot.scale.setScalar(hugScale);
 
         w.feathers.forEach((f, idx) => {
+          const ud = f.userData;
           const follow = Math.sin(elapsedTime * flapSpeed + w.phase - idx * 0.16);
-          f.rotation.z = f.userData.baseRotZ + w.side * follow * 0.05 * (0.4 + loveEnergy * 0.6);
-          f.rotation.x = f.userData.baseRotX + e * (0.15 + idx * 0.02); // 羽片內彎成包覆弧面
+          // 環抱時羽毛由「朝外伸」逐漸轉成「朝下垂」，像披風順著身體垂下（直羽毛朝外伸會戳出圓弧外）
+          const thetaE = ud.theta + (LOVE_HUG_HANG_DEG - ud.theta) * e * LOVE_HUG_HANG;
+          f.rotation.z = w.side * (thetaE * Math.PI / 180 - Math.PI / 2) + w.side * follow * 0.05 * (0.4 + loveEnergy * 0.6);
+          f.scale.y = ud.baseScale.y * (1 - LOVE_HUG_SHORTEN * e);
+          f.rotation.x = ud.baseRotX + e * (0.15 + ud.curl * 0.02); // 羽片微微內彎成包覆弧面
+
+          // 圓柱彎曲：沿翼展方向 u 的距離 → 圓弧上的角度 a；z 層次（羽毛厚度）沿圓弧法線方向偏移
+          if (hugC > 1e-4) {
+            const u = Math.abs(ud.basePos.x);   // 離肩膀的水平距離
+            const zl = ud.basePos.z - (w.side < 0 ? 0.16 * e : 0); // 羽毛疊層厚度；左翼整體稍微在外圈，兩邊翼尖交疊時不互相穿插
+            // FIXED-008: 越外側彎越多的係數必須乘 e，否則 e→0 時（收回）羽毛會被拉長 35% 回不到原位
+            const a = hugC * u * (1 + 0.45 * e * Math.min(1, u / 2.5)); // 越外側彎越多：根部貼身、外端繞到胸前
+            const sa = Math.sin(a), ca = Math.cos(a);
+            f.position.set(
+              w.side * (sa / hugC - zl * sa),
+              ud.basePos.y - LOVE_HUG_DROP * e * Math.pow(Math.min(1, u / 2.5), 1.5), // 越外端垂得越低
+              (1 - ca) / hugC + zl * ca
+            );
+            f.rotation.y = -w.side * (a + LOVE_HUG_TIP_CURL * e * Math.min(1, u / 2.5)); // 順著圓弧切線轉向，外側再多往內收
+          } else {
+            f.position.copy(ud.basePos);
+            f.rotation.y = 0;
+          }
           // 環抱時羽毛發光大幅加強
-          f.material.emissiveIntensity = f.userData.baseEmissive + e * 1.8;
+          f.material.emissiveIntensity = ud.baseEmissive + e * 1.8;
         });
       });
     }
@@ -6236,11 +9650,13 @@ function animate() {
     voidCore.rotation.y += 0.008;
     voidInnerWire.rotation.x -= 0.012;
     voidInnerWire.rotation.y += 0.015;
+    applyVoidTeleportShake(elapsedTime);
 
+    const ringBoost = 1 + (voidTeleportShake.active ? voidTeleportShake.amp * 7 : 0);   // 維度失穩時陀螺環瘋狂加速
     voidGyroRings.forEach((ring) => {
-      ring.rotation.x += ring.userData.rotXSpeed;
-      ring.rotation.y += ring.userData.rotYSpeed;
-      ring.rotation.z += ring.userData.rotZSpeed;
+      ring.rotation.x += ring.userData.rotXSpeed * ringBoost;
+      ring.rotation.y += ring.userData.rotYSpeed * ringBoost;
+      ring.rotation.z += ring.userData.rotZSpeed * ringBoost;
     });
 
     // 古文明符文：螺旋靠近核心 → 被吸入 → 外側補新的
@@ -6280,6 +9696,12 @@ function animate() {
       p.halo2.rotation.y -= 0.018 * frenzyMult;
       p.crownGroup.rotation.y += 0.008 * frenzyMult;
       p.core.rotation.y += 0.006;
+      p.glassMats.forEach(gm => setSinsUniform(gm, elapsedTime, uFrenzyVal));
+      // 玻璃裡的核心：鑽石與迷你王冠緩轉，三道金環各自旋轉
+      p.inner.rotation.y -= 0.01 * frenzyMult;
+      p.gyros[0].rotation.z += 0.018 * frenzyMult;
+      p.gyros[1].rotation.x += 0.013 * frenzyMult;
+      p.gyros[2].rotation.x -= 0.016 * frenzyMult;
       const b = Math.sin(elapsedTime * 2.0) * 0.05 * frenzyMult + 1.0;
       p.core.scale.set(b, b, b);
       if (!swarmLock) p.group.position.y = p.group.userData.basePos.y + Math.sin(elapsedTime * 1.5) * 0.15;
@@ -6298,6 +9720,25 @@ function animate() {
         const curl = Math.sin(elapsedTime * 3.0 + idx * 0.8) * 0.12 * frenzyMult;
         claw.rotation.z = curl;
       });
+      // 小觸爪與大爪反相擺動，像一張一合的「抓取」節奏
+      g.claws2.forEach((claw, idx) => {
+        setSinsUniform(claw.material, elapsedTime, uFrenzyVal);
+        claw.rotation.z = -Math.sin(elapsedTime * 3.0 + idx * 0.8) * 0.16 * frenzyMult;
+      });
+      g.collar.rotation.y += 0.011 * frenzyMult;
+      // 金幣：繞行＋翻轉＋緩慢內縮，進到核心附近就從外圈重生
+      for (let i = 0; i < g.coinData.length; i++) {
+        const c = g.coinData[i];
+        c.theta += c.speed * frenzyMult;
+        c.rot += c.spin * frenzyMult;
+        c.r -= 0.0025 * frenzyMult;
+        if (c.r < 0.95) c.r = 2.8 + Math.random() * 0.4;
+        g.coinDummy.position.set(c.r * Math.cos(c.theta), c.y + Math.sin(elapsedTime * 1.6 + i) * 0.06, c.r * Math.sin(c.theta));
+        g.coinDummy.rotation.set(c.rot, c.theta, c.rot * 0.6);
+        g.coinDummy.updateMatrix();
+        g.coins.setMatrixAt(i, g.coinDummy.matrix);
+      }
+      g.coins.instanceMatrix.needsUpdate = true;
       if (g.particles) {
         const positions = g.particles.geometry.attributes.position.array;
         const pData = g.pData;
@@ -6368,17 +9809,30 @@ function animate() {
       if (!swarmLock) e.group.position.y = e.group.userData.basePos.y + Math.sin(elapsedTime * 1.6 + 3) * 0.14;
     }
 
-    // 5. 慾 (Lust)
+    // 5. 慾 (Lust) — 纏縛螺旋：核雙拍搏動，每次心跳籠收緊、刃瓣合攏、誘引絲晃動
     if (sinCreatures.lust) {
       const l = sinCreatures.lust;
-      l.helixGroup.rotation.y += 0.018 * frenzyMult;
-      l.helixGroup.children.forEach(h => setSinsUniform(h.material, elapsedTime, uFrenzyVal));
-      l.petals.forEach((pet, idx) => {
-        setSinsUniform(pet.material, elapsedTime, uFrenzyVal);
-        const petBreath = Math.sin(elapsedTime * 2.5 + idx * 0.4) * 0.18 * frenzyMult;
-        pet.rotation.x = pet.userData.baseRotX + petBreath * 0.4;
-        pet.rotation.z = pet.userData.baseRotZ + petBreath * 0.3;
+      const bp = (elapsedTime * 1.15) % 1;
+      const beat = Math.min(1, Math.exp(-16 * Math.abs(bp - 0.12)) + 0.6 * Math.exp(-18 * Math.abs(bp - 0.30)));
+      l.ribbonMats.forEach(m => setSinsUniform(m, elapsedTime, uFrenzyVal));
+      l.bladeMats.forEach(m => setSinsUniform(m, elapsedTime, uFrenzyVal));
+      setSinsUniform(l.coreMat, elapsedTime, uFrenzyVal);
+      l.coreMat.uniforms.uBeat.value = beat;
+      l.core.scale.set(1 + beat * 0.18, 1.18 + beat * 0.22, 1 + beat * 0.18);
+      l.aura.material.opacity = 0.8 + beat * 0.4;
+      l.halo.material.opacity = 0.3 + beat * 0.2;
+      l.glowLight.intensity = (1.2 + beat * 1.6) * (1 + uFrenzyVal * 0.5);
+      l.cage.rotation.y += 0.008 * frenzyMult;
+      const squeeze = 1 - beat * 0.10 * (1 + uFrenzyVal);
+      l.cage.scale.set(squeeze, 1, squeeze);
+      l.blades.forEach((p) => {
+        p.rotation.z = Math.sin(elapsedTime * 0.7 + p.userData.phase) * 0.08 - beat * 0.16 * frenzyMult;   // 心跳時向內合攏
       });
+      l.lures.forEach((p, i) => {
+        p.rotation.z = Math.sin(elapsedTime * 0.9 + i * 2.1) * 0.10;
+        p.rotation.x = Math.sin(elapsedTime * 0.6 + i) * 0.06;
+      });
+      l.tips.forEach((t) => { const s = 0.45 + beat * 0.22; t.scale.set(s, s, 1); });
       if (!swarmLock) l.group.position.y = l.group.userData.basePos.y + Math.sin(elapsedTime * 2.0 + 4) * 0.12;
     }
 
@@ -6395,36 +9849,37 @@ function animate() {
       if (!swarmLock) gt.group.position.y = gt.group.userData.basePos.y + Math.sin(elapsedTime * 1.4 + 5) * 0.15;
     }
 
-    // 7. 怠慢 (Sloth) — 漆黑兜帽垂紗者
+    // 7. 怠慢 (Sloth) — 滯重沉降者：呼吸像地層錯動、偶爾沉重地一頓、環繞灰燼與收縮的重力圈
     if (sinCreatures.sloth) {
       const sl = sinCreatures.sloth;
-      setSinsUniform(sl.cloakMat, elapsedTime, uFrenzyVal);
-      // 極慢呼吸：袍身幾乎不動，只有布面微微起伏（怠慢＝遲鈍）
-      const breath = Math.sin(elapsedTime * 0.6);
-      sl.body.scale.set(1 + breath * 0.012, 1 + breath * 0.018, 1 + breath * 0.012);
-      // 兜帽微微點頭（整組一起動，含帽布與赤瞳）
-      sl.hoodGroup.rotation.x = -0.06 + Math.sin(elapsedTime * 0.45) * 0.05;
-      sl.hoodGroup.position.y = 2.62 + breath * 0.015;
-      // 赤瞳極慢明滅
-      const eyePulse = 0.55 + 0.45 * Math.sin(elapsedTime * 0.8);
-      sl.eyes.forEach((e) => {
-        e.material.opacity = 0.6 + eyePulse * 0.4;
-        e.scale.set(0.24 + eyePulse * 0.05, 0.14 + eyePulse * 0.03, 1);
+      setSinsUniform(sl.bodyMat, elapsedTime, uFrenzyVal);
+      const breath = Math.sin(elapsedTime * 0.45);
+      sl.body.scale.set(1 + breath * 0.01, 1 + breath * 0.02, 1 + breath * 0.01);
+      // 沉重地一頓：每隔幾秒身體往下頓一下再慢慢回彈
+      const thud = Math.pow(Math.max(0, Math.sin(elapsedTime * 0.8)), 24);
+      sl.shape.position.y = -0.05 * thud;
+      sl.arms.forEach((a, i) => { a.rotation.y = Math.sin(elapsedTime * 0.2 + i * 2.0) * 0.015; });
+      sl.shards.rotation.y = elapsedTime * 0.06;
+      sl.shards.children.forEach((m) => { m.rotation.x += m.userData.spin * 0.01; m.rotation.y += m.userData.spin * 0.012; });
+      // 重力圈向內收縮
+      sl.rings.forEach((r) => {
+        const ph = (elapsedTime * 0.14 + r.userData.i / 3) % 1;
+        const sc = 3.6 - 2.7 * ph;
+        r.scale.set(sc, sc, 1);
+        r.material.opacity = Math.sin(ph * Math.PI) * 0.4 * (1 + uFrenzyVal * 0.6);
       });
-      // 垂紗輕微擺動
-      sl.cape.rotation.z = Math.sin(elapsedTime * 0.35) * 0.03;
-      sl.cape.rotation.y = Math.sin(elapsedTime * 0.27 + 1.2) * 0.05;
-      sl.cape2.rotation.z = Math.sin(elapsedTime * 0.31 + 2.1) * 0.035;
-      sl.cape2.rotation.y = Math.sin(elapsedTime * 0.24 + 0.6) * 0.05;
-      // 袍腳暗紫積霧呼吸
-      sl.mist.material.opacity = 0.4 + Math.sin(elapsedTime * 0.7) * 0.12;
-      // 地面長鬚：各自極慢扭動，像墨在地面緩慢擴散
-      sl.tentacles.forEach((t, idx) => {
-        setSinsUniform(t.material, elapsedTime, uFrenzyVal);
-        t.rotation.y = Math.sin(elapsedTime * 0.22 + idx * 0.8) * 0.03;
-        t.position.y = Math.sin(elapsedTime * 0.3 + idx * 1.3) * 0.012;
-      });
+      // 灰燼微粒緩慢下沉並向中心靠攏
+      const mpos = sl.motes.geometry.attributes.position.array;
+      for (let i = 0; i < mpos.length; i += 3) {
+        mpos[i + 1] -= 0.0035;
+        mpos[i] *= 0.9995; mpos[i + 2] *= 0.9995;
+        if (mpos[i + 1] < 0.05) { const a = Math.random() * Math.PI * 2, r = 0.8 + Math.random() * 2.4; mpos[i] = Math.cos(a) * r; mpos[i + 1] = 3.4; mpos[i + 2] = Math.sin(a) * r; }
+      }
+      sl.motes.geometry.attributes.position.needsUpdate = true;
     }
+
+    // 罪孽狂宴：七隻各自的 5 秒編舞（蓋在上面各自的常態動作之上）
+    if (isSinsFrenzy) applySinsFrenzyChoreo();
 
     // 共生連線：弧管微光呼吸 + 光點沿曲線流動
     sinWebTubes.forEach((tube) => {
