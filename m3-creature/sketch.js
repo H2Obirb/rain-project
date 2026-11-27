@@ -260,6 +260,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initScene();
   setupHitbox();
   buildLoveEnvironment();
+  buildLoveSky();
   buildShameEnvironment();
   buildSinsEnvironment();
   setupSceneLighting();
@@ -285,10 +286,54 @@ window.addEventListener('DOMContentLoaded', () => {
 //  2. 接觸陰影（柔邊暗斑）：房屋、車、街區建築底下的環境遮蔽感，免即時 SSAO。
 //  3. 太陽光陰影 normalBias，去掉陰影斑紋。
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// 【愛】人類消失很久後的太陽：離地球更近 → 視直徑異常地大；白天，太陽是白的
+//   視半徑 4.5°（現在的太陽約 0.27°，大約 17 倍）。太陽放在鏡頭前方偏高處（仰角約 22°），一進場就看得到；
+//   同一個方向同時決定：天空上的圓盤、DirectionalLight 的方向（→ 影子往鏡頭這邊拉長）、反射用環境貼圖裡的亮點（→ 玻璃反光）。
+// -------------------------------------------------------------
+const LOVE_SUN_DIR = new THREE.Vector3(0.12, 0.38, -0.92).normalize();
+const LOVE_SUN_ANGULAR_RADIUS = 4.5 * Math.PI / 180;
+let loveSkyDome = null;
+
+function buildLoveSky() {
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
+    uniforms: {
+      uSunDir: { value: LOVE_SUN_DIR.clone() },
+      uSunRad: { value: LOVE_SUN_ANGULAR_RADIUS },
+    },
+    vertexShader: 'varying vec3 vDir; void main(){ vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: [
+      'varying vec3 vDir; uniform vec3 uSunDir; uniform float uSunRad;',
+      'void main(){',
+      '  vec3 d = normalize(vDir);',
+      '  float h = clamp(d.y, 0.0, 1.0);',
+      // 天空漸層：地平線淡藍白（跟霧同色，遠景才不會有接縫）→ 中段晴藍 → 天頂較深的藍
+      '  vec3 horizon = vec3(0.74, 0.85, 0.94), mid = vec3(0.45, 0.69, 0.92), zenith = vec3(0.22, 0.46, 0.84);',
+      '  vec3 sky = mix(horizon, mid, smoothstep(0.0, 0.28, h));',
+      '  sky = mix(sky, zenith, smoothstep(0.25, 0.95, h));',
+      '  float ang = acos(clamp(dot(d, normalize(uSunDir)), -1.0, 1.0));',
+      // 太陽周圍的暈光：偏白帶一點暖，近處亮、遠處淡（大氣散射）
+      '  sky += vec3(1.0, 0.96, 0.88) * (exp(-ang * 7.0) * 0.6 + exp(-ang * 2.2) * 0.18);',
+      // 圓盤：白色，邊緣只有極輕微的暖黃（limb darkening）
+      '  float r = ang / uSunRad;',
+      '  vec3 disk = mix(vec3(1.0, 1.0, 0.97), vec3(1.0, 0.95, 0.84), pow(clamp(r, 0.0, 1.0), 3.0));',
+      '  float inside = 1.0 - smoothstep(0.96, 1.0, r);',
+      '  gl_FragColor = vec4(mix(sky, disk, inside), 1.0);',
+      '}',
+    ].join('\n'),
+  });
+  loveSkyDome = new THREE.Mesh(new THREE.SphereGeometry(500, 48, 24), mat);
+  loveSkyDome.renderOrder = -1000;
+  loveSkyDome.frustumCulled = false;
+  loveSkyDome.visible = false;
+  scene.add(loveSkyDome);
+}
+
 function makeEnvTexture(pm, kind) {
   const es = new THREE.Scene();
   const stops = kind === 'love'
-    ? [[-1, 0x8da35a], [-0.05, 0xb5cb6f], [0.02, 0xfff1d6], [0.35, 0xcfe6ff], [1, 0x6fa8e8]]
+    ? [[-1, 0x8da35a], [-0.05, 0xb5cb6f], [0.02, 0xbcd8ec], [0.3, 0x73aeea], [1, 0x3875d6]]
     : [[-1, 0x0b0f0c], [-0.05, 0x141c17], [0.05, 0x26362b], [0.5, 0x1a2a22], [1, 0x0e1612]];
   const geo = new THREE.SphereGeometry(50, 32, 16);
   const pos = geo.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color(), c1 = new THREE.Color();
@@ -307,8 +352,10 @@ function makeEnvTexture(pm, kind) {
     m.position.set(x, y, z); m.lookAt(0, 0, 0); es.add(m);
   };
   if (kind === 'love') {
-    panel(0xfff3e0, 8, 25, 39, 17, 16, 16);        // 太陽
-    panel(0xdfeeff, 1.5, -30, 20, -20, 30, 12);    // 天空補光
+    // 太陽：位置＝LOVE_SUN_DIR（半徑 50 處），邊長＝視直徑 9° 的實際寬度；亮度 > 1 保留 HDR，反在玻璃上才有「一點亮光」
+    const sp = LOVE_SUN_DIR.clone().multiplyScalar(50), sw = 2 * 50 * Math.tan(LOVE_SUN_ANGULAR_RADIUS);
+    panel(0xfffaf0, 26, sp.x, sp.y, sp.z, sw, sw);
+    panel(0xdfeeff, 1.6, 30, 22, 20, 30, 12);      // 天空補光（放在太陽的對面）
   } else {
     panel(0xffb347, 5, -30, 8, -20, 10, 6);        // 琥珀燈
     panel(0x39d353, 4, 25, 10, -28, 10, 8);        // 化技綠
@@ -331,6 +378,7 @@ function applyEnvReflections(group, tex, base) {
     if (m.roughness >= 0.9 && m.metalness < 0.2) return;
     m.envMap = tex;
     m.envMapIntensity = base * Math.min(1, Math.max(0.1, (0.95 - m.roughness) * 2.2)) + m.metalness * 0.3;
+    if (m.roughness <= 0.12) m.envMapIntensity *= 2.6;   // 玻璃級光滑：反射加強（窗戶、車窗）
     m.needsUpdate = true;
   });
 }
@@ -389,7 +437,7 @@ function initScene() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.35;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;   // PCF 才吃得到 shadow.radius（愛的大太陽需要寬半影）
   container.appendChild(renderer.domElement);
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -426,7 +474,7 @@ function initScene() {
   sunLight.shadow.camera.top = 48;
   sunLight.shadow.camera.bottom = -48;
   sunLight.shadow.camera.near = 1;
-  sunLight.shadow.camera.far = 90;
+  sunLight.shadow.camera.far = 160;   // 愛的太陽放在 70 外、仰角低，光線方向上的深度範圍比較長
   sunLight.shadow.bias = -0.0004;
   scene.add(sunLight);
 
@@ -915,7 +963,7 @@ function houseWindowMat(shutter, state) {
   }
   g.fillStyle = ruined ? '#9a947f' : '#e4dfd2'; g.fillRect(fx - 3, 120, fw + 6, 6);  // 窗台
   const t = new THREE.CanvasTexture(c);
-  const m = new THREE.MeshStandardMaterial({ map: t, roughness: 0.22, metalness: 0.1, alphaTest: 0.5 });
+  const m = new THREE.MeshStandardMaterial({ map: t, roughness: ruined ? 0.22 : 0.06, metalness: 0.1, alphaTest: 0.5 });   // 完好的玻璃更光滑，反射天空與太陽
   _houseCache.mat[key] = m;
   return m;
 }
@@ -1484,7 +1532,7 @@ function buildCar(x, z, rotY, bodyColor, type) {
   const std = (c, r, m) => new THREE.MeshStandardMaterial({ color: c, roughness: r == null ? 0.85 : r, metalness: m || 0 });
   const paintCol = new THREE.Color(bodyColor).lerp(new THREE.Color(0x8a7f6d), 0.3);   // 褪色
   const paint = new THREE.MeshPhysicalMaterial({ color: paintCol, roughness: 0.4, metalness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.35 });
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0x33474f, roughness: 0.25, metalness: 0.3, side: THREE.DoubleSide });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x33474f, roughness: 0.05, metalness: 0.55, side: THREE.DoubleSide });
   const dark = std(0x1c1c1e, 0.9);
   const rust = [0x8a4a2a, 0x6b3a22, 0x4f6a38];
   const W = T.W, Bw = W / 2 + 0.05, belt = T.belt, front = T.front, rear = T.rear;
@@ -4043,19 +4091,36 @@ const LOVE_SHROUD_CLOTH_FRAG = `
       : normalize(rel + vec3(0.0, 0.0001, 0.0));
     float facing = dot(normalize(vNLocal), outward);
     float cavity = smoothstep(0.12, -0.30, facing);
-    col = mix(col, vec3(0.020, 0.020, 0.026), cavity);
+    col = mix(col, vec3(0.125, 0.070, 0.040), cavity); // 深褐色（原本是近黑）
 
     // 兜帽縫那顆眼球凸起 → 直接塗成發亮的白圓（不是另加一顆球，而是把布面本身塗白）
     float dEye = distance(vLocal, uEyeLocal);
+    // 發亮圓體比布面凸起大一些（放大 3.2 倍）：白圓、黑凹槽、暈光、靶心環全部用這個半徑
+    float eyeR = uEyeRadius * 3.2;
     // 眼睛周圍的凹槽一併塗黑 → 白圓像鑲在一個黑洞裡（跟參考圖一致）
-    float socket = 1.0 - smoothstep(uEyeRadius * 1.05, uEyeRadius * 3.2, dEye);
-    col = mix(col, vec3(0.015, 0.015, 0.020), socket * 0.90);
-    float eyeCore = 1.0 - smoothstep(uEyeRadius * 0.80, uEyeRadius, dEye);
-    float eyeHalo = 1.0 - smoothstep(uEyeRadius, uEyeRadius * 3.4, dEye);
+    // 兜帽開口內側（眼球周圍那一小塊）整個塗黑：用「縱向拉長的橢圓」量距離，貼合開口上窄下連到黑縫的水滴形；
+    // 橫向半徑約 1.5 倍圓體半徑（剛好到開口邊緣，不溢到外面的布），縱向約 2.5 倍
+    vec3 de = vLocal - uEyeLocal;
+    float dEll = length(vec3(de.x, de.y * 0.6, de.z));
+    float socket = 1.0 - smoothstep(eyeR * 1.35, eyeR * 1.65, dEll);
+    col = mix(col, vec3(0.125, 0.070, 0.040), socket);
+
+    float eyeCore = 1.0 - smoothstep(eyeR * 0.80, eyeR, dEye);
+    float eyeHalo = 1.0 - smoothstep(eyeR, eyeR * 1.5, dEye);
     float eyePulse = 0.86 + 0.14 * sin(uTime * 2.4);
     col = mix(col, vec3(1.0, 1.0, 1.0), eyeCore);
     col += vec3(0.58, 0.72, 1.0) * eyeHalo * eyeHalo * 0.30 * eyePulse;
     col += vec3(1.0, 0.98, 0.94) * eyeCore * 1.30 * eyePulse;
+    // 標靶：發亮的圓體裡刻 3 圈較粗的藍色同心環（由外往內越來越小）＋中心亮點，環會慢慢往內縮、再從外圍長出來
+    float eyeRings = 0.0;
+    for (int k = 0; k < 3; k++) {
+      float p = fract(float(k) / 3.0 - uTime * 0.12);        // 1 = 最外，0 = 最內；往內縮
+      float rr = mix(0.18, 0.86, p) * eyeR;
+      float fadeR = smoothstep(0.0, 0.18, p) * (1.0 - smoothstep(0.85, 1.0, p));
+      eyeRings += exp(-pow((dEye - rr) / (eyeR * 0.12), 2.0)) * fadeR;
+    }
+    col = mix(col, vec3(0.28, 0.60, 1.0), clamp(eyeRings, 0.0, 1.0) * eyeCore * 0.95);
+    col += vec3(1.0) * (1.0 - smoothstep(0.0, eyeR * 0.16, dEye)) * 0.6;
 
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
@@ -8988,7 +9053,9 @@ function setSpecies(species) {
   const sunLight = scene.getObjectByName('sunLight');
   const hemiLight = scene.getObjectByName('hemiLight');
   if (ambientLight) { ambientLight.color.setHex(0x221520); ambientLight.intensity = 1.4; }
-  if (sunLight) sunLight.intensity = 0;
+  if (sunLight) { sunLight.intensity = 0; sunLight.position.set(18, 28, 12); sunLight.shadow.radius = 1; }
+  renderer.toneMappingExposure = 1.35;
+  if (loveSkyDome) loveSkyDome.visible = false;
   if (hemiLight) hemiLight.intensity = 0;
   if (mainLight) mainLight.intensity = 3.8;
   if (backLight) backLight.intensity = 3.2;
@@ -9011,12 +9078,20 @@ function setSpecies(species) {
     loveGroup.visible = true;
     if (loveEnvGroup) loveEnvGroup.visible = true;
 
-    // 晴天美國住宅社區：暖陽高飽和背景
-    scene.background = new THREE.Color(0x72c7ec);
-    scene.fog = new THREE.FogExp2(0x9fd8ec, 0.008);
-    if (ambientLight) { ambientLight.color.setHex(0xfff2dd); ambientLight.intensity = 0.75; }
-    if (sunLight) { sunLight.color.setHex(0xffdfb0); sunLight.intensity = 1.35; }
-    if (hemiLight) { hemiLight.color.setHex(0xcce5ff); hemiLight.groundColor.setHex(0xd9c1a3); hemiLight.intensity = 0.7; }
+    // 大白天：白色的大太陽（見 LOVE_SUN_DIR）。曝光壓低、環境光／天光減弱，陽光變成主角 →
+    // 受光處亮、背光處暗，影子與反光才明顯；同時避免整個畫面一片亮到刺眼
+    if (loveSkyDome) loveSkyDome.visible = true;
+    scene.background = new THREE.Color(0xbdd8ec);
+    scene.fog = new THREE.FogExp2(0xbcd6e9, 0.008);   // 霧色＝天空地平線色
+    renderer.toneMappingExposure = 0.9;
+    if (ambientLight) { ambientLight.color.setHex(0xdde8f6); ambientLight.intensity = 0.3; }
+    if (sunLight) {
+      sunLight.color.setHex(0xfff4e2); sunLight.intensity = 2.3;
+      sunLight.position.copy(LOVE_SUN_DIR).multiplyScalar(70);   // 光從太陽圓盤的方向來 → 影子往鏡頭這邊拉長
+      sunLight.shadow.radius = 1.6;                               // 邊緣有一點柔，但輪廓清楚
+      sunLight.shadow.camera.updateProjectionMatrix();
+    }
+    if (hemiLight) { hemiLight.color.setHex(0x9fc4ee); hemiLight.groundColor.setHex(0xa9a38a); hemiLight.intensity = 0.36; }
 
     // 鏡頭永遠跟隨「愛」：關閉自動旋轉
     controls.autoRotate = false;
@@ -9274,6 +9349,8 @@ function animate() {
       lamp.bulbMat.emissiveIntensity = 0.4 + flicker;
     });
   }
+
+  if (loveSkyDome && loveSkyDome.visible) loveSkyDome.position.copy(camera.position);   // 天空永遠在無限遠：跟著鏡頭走
 
   if (currentSpecies === 'love') {
     // 【愛】WASD 移動：方向相對於鏡頭朝向（W 前進 = 鏡頭前方）

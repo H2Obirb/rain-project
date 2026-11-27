@@ -68,6 +68,8 @@ node tools/shot.js "http://127.0.0.1:3001/" "C:\Users\annaj\AppData\Local\Temp\o
 - **一定要先 `npm run serve` 再截**，不要截 `file://`（字型／CDN 可能被擋）
 - WebGL 場景（three.js）等待至少 **4000–8000ms** 再拍
 - 截圖路徑一律用 `C:\Users\annaj\AppData\Local\Temp\opencode\`，別放專案裡
+- **看完確認就刪**：AI 為了檢查畫面而拍的截圖（含 chrome-devtools MCP 拍的），看完、確認結果後立刻刪掉該檔案，不要留著累積
+- 例外：我說要「留著／交作業用」的截圖，直接存進該站資料夾，不刪
 - **絕不**連到使用者正在用的瀏覽器視窗；本腳本開的是獨立 headless 實例，安全
 
 ### 3. chrome-devtools-mcp（opencode 已掛）

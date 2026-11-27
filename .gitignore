@@ -1,3 +1,10 @@
 node_modules/
 DEBUG_STATUS.json
 *.log
+
+# Windows 桌面捷徑（內容是本機網址，別人打不開）
+*.url
+
+# AI 工具設定
+.claude/
+.opencode/
